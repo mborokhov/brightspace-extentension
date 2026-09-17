@@ -2,7 +2,7 @@
 
 A shareable Chrome/Edge extension for Purdue Brightspace, Gradescope, and MyLab Math. No API key, server, or build step. Each person uses their own school login and browser storage.
 
-**Version 0.2.0 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
+**Version 0.2.1 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
 
 ## Install or update
 
@@ -22,7 +22,7 @@ For an existing installation pointing at this folder, click **Reload** on its ex
 4. Click **Sync** to revisit discovered current course/list pages. **Sync details** shows coverage and failures.
 5. For MyLab Math, click **MyLab Math** and grant its optional site access. Open your course's **Homework and Tests** page, reload it, then confirm the course in **Courses** if needed. Embedded lists on supported Pearson hosts are included.
 
-A sync checks up to 60 pages in background tabs. It does not start assignments or quizzes. Sign-in tabs may stay open so you can sign in normally and retry. Pages/sections that are not loaded must be opened manually.
+A sync checks up to 60 pages in background tabs. In its own temporary MyLab portal tabs, it opens the same-course Assignments menu and waits for the list; your existing tabs are not navigated. It does not start assignments or quizzes. Sign-in tabs may stay open so you can sign in normally and retry. Pages/sections that are not loaded must be opened manually.
 
 Semester detection uses Spring (January–May), Summer (June–July), and Fall (August–December), in the configured course time zone. It checks course labels, not assignment due dates. Unlabelled courses are excluded until you select them. On upgrade from v0.1, existing records with no semester label require this confirmation; old records remain stored but hidden.
 
@@ -32,6 +32,7 @@ Semester detection uses Spring (January–May), Summer (June–July), and Fall (
 - **Calendar:** month navigation and assignments on their due dates. Click an assignment to edit its deadline.
 - **Edit date:** sets a local deadline, optionally without a time. Later syncs preserve it. **Use source date** restores the latest source deadline. Edits affect the chart, calendar, reminders, and export; they never modify the school site.
 - **Completion:** checkboxes are local overrides. **Use source status** removes an override. On Brightspace quiz lists, any populated Evaluation Status cell means completed; attempts alone do not. “Not Submitted” assignments stay pending.
+- **Duplicate cleanup:** Brightspace calendar links such as “View Event - Written Homework 11 - Due” are excluded from new scans. Existing copies reconcile with the same-course assignment, preserving local deadline and completion choices. Ambiguous same-name assignments and distinct native assignment IDs stay separate.
 - **Dates:** Gradescope uses the right-hand due date, excluding the release date and late cutoff. Brightspace uses the “Due on” line under the assignment/quiz name.
 - **Export .ics:** downloads a snapshot of all current-course incomplete assignments with readable dates. Google Calendar live sync is not implemented yet. Importing an .ics file does not create ongoing synchronization.
 
@@ -47,7 +48,7 @@ Send the project ZIP or repository link. Friends load their own `extension` fold
 - Missing times remain date-only; missing years are inferred and cannot trigger reminders until corrected. Unreadable deadlines remain undated and can be edited.
 - Reminders are opt-in, checked about once per minute while the browser runs. Completed, past-due, undated/date-only, inferred-year, and more-than-seven-days-stale records are excluded. OS settings can suppress notifications.
 - Partial scans do not delete assignments that disappeared from the page. Cross-platform duplicates remain separate; mark an unwanted duplicate complete locally.
-- Only loaded list rows are read. Syllabus PDFs, announcements, closed shadow roots, and unsupported/custom layouts are outside coverage. MyLab Math support currently targets visible assignment tables/cards with due labels on the supported hosts; live verification of your signed-in layout remains necessary.
+- Only loaded list rows are read. Syllabus PDFs, announcements, closed shadow roots, and unsupported/custom layouts are outside coverage. MyLab Math support currently targets due-first tables, short-year dates such as `09/06/26`, embedded lists, and Course Home date-badge cards on the supported hosts; live verification of your signed-in layout remains necessary.
 - Use one school account per browser profile. Before switching accounts, clear local data in Settings. Clearing pauses collection; enable it again after signing into the new account.
 
 ## Develop

@@ -9,6 +9,7 @@
     try { const u = new URL(value); return u.protocol === 'https:' && HOSTS.includes(u.hostname) && !u.username && !u.password && !u.port; } catch { return false; }
   }
   function canonicalURL(value, base) {
+    if(typeof value!=='string'||!value.trim())return '';
     try {
       const u = new URL(value, base);
       if (!allowedURL(u.href)) return '';
@@ -19,6 +20,10 @@
     } catch { return ''; }
   }
   const sourceFor = url => new URL(url).hostname.endsWith('brightspace.com') ? 'brightspace' : PEARSON_HOSTS.includes(new URL(url).hostname) ? 'pearson' : 'gradescope';
+  // Embedded Pearson list routes vary. Inspect their DOM, but never crawl or read players.
+  function canInspectPearson(value) {
+    return allowedURL(value) && sourceFor(value)==='pearson' && !/player|launch|take(?:test|quiz)|review|question|answer|\/auth|\/login|\/signin/i.test(new URL(value).pathname);
+  }
   function pageKind(value) {
     if (!allowedURL(value)) return '';
     const u = new URL(value), p = u.pathname;
@@ -49,11 +54,18 @@
     return [...u.searchParams].find(([key]) => /^(ou|courseid|course)$/i.test(key))?.[1] || u.pathname.match(/\/(?:courses|home)\/([\w-]+)/)?.[1] || '';
   }
   function hash(text) { let h = 2166136261; for (const ch of String(text)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); } return (h >>> 0).toString(36); }
+  const isEventAlias = item => item.source==='brightspace' && (item.eventAlias===true || /^view\s+event\s*[-:–—]/i.test(clean(item.title)));
+  function assignmentTitle(item) { return isEventAlias(item) ? clean(item.title).replace(/^view\s+event\s*[-:–—]\s*/i,'').replace(/\s*[-:–—]\s*due\s*$/i,'').trim() : clean(item.title,250); }
+  function nativeAssignmentId(item) {
+    if(isEventAlias(item))return '';
+    const u=new URL(item.url);
+    return item.nativeId || u.pathname.match(/\/assignments\/(\d+)/)?.[1] || [...u.searchParams].find(([key]) => /^(db|qi|homeworkid|assignmentid|testid)$/i.test(key))?.[1] || '';
+  }
   function assignmentId(item) {
     const u = new URL(item.url), course = item.courseId || courseId(item.pageURL || item.url);
-    const id = item.nativeId || u.pathname.match(/\/assignments\/(\d+)/)?.[1] || [...u.searchParams].find(([key]) => /^(db|qi|homeworkid|assignmentid|testid)$/i.test(key))?.[1];
+    const id = nativeAssignmentId(item);
     const type = item.type === 'quiz' || /quizz/i.test(u.pathname) ? 'quiz' : 'assignment';
-    return `${item.source}:${course}:${type}:${id || hash(clean(item.title).toLowerCase())}`;
+    return `${item.source}:${course}:${type}:${id || hash(assignmentTitle(item).toLowerCase())}`;
   }
   function validZone(zone) { try { new Intl.DateTimeFormat('en', {timeZone: zone}).format(); return true; } catch { return false; } }
   function zoneParts(ms, zone) {
@@ -86,11 +98,11 @@
     }
     const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
     const named = text.match(/\b(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\.?\s+(\d{1,2})(?:st|nd|rd|th)?(?:,?\s+(20\d{2}))?\b/i);
-    const numeric = text.match(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2})\b/);
+    const numeric = text.match(/\b(\d{1,2})\/(\d{1,2})\/(20\d{2}|\d{2})\b/);
     const plainISO = text.match(/\b(20\d{2})-(\d{2})-(\d{2})\b/);
     let y, m, d, inferred = false;
     if (named) { m = months.indexOf(named[1].slice(0, 3).toLowerCase()) + 1; d = +named[2]; y = +named[3]; }
-    else if (numeric) { m = +numeric[1]; d = +numeric[2]; y = +numeric[3]; }
+    else if (numeric) { m = +numeric[1]; d = +numeric[2]; y = numeric[3].length===2 ? 2000 + +numeric[3] : +numeric[3]; }
     else if (plainISO) { y = +plainISO[1]; m = +plainISO[2]; d = +plainISO[3]; }
     else return {...result, dateNote: 'Unrecognized deadline — check source'};
     if (!y) {
@@ -136,6 +148,8 @@
       if (state.job?.running) { state.job.running = false; state.job.note = 'Choose your current courses, then sync.'; }
       state.schema = 2;
     }
+    state.items=deduplicateItems(state.items);
+    for(const item of Object.values(state.items))if(item.source==='pearson'&&!item.dueAt&&!item.dueDate&&item.dueRaw)Object.assign(item,parseDue(item.dueRaw,state.settings.zone,now));
     return state;
   }
   function isCourseActive(state,key) { const c = state.courses[key]; return !!(c?.enabled && !c.inactive && c.term === state.activeTerm); }
@@ -152,16 +166,52 @@
   function weekStart(now,zone) { const key = dateKey(now,zone), weekday = new Date(`${key}T12:00:00Z`).getUTCDay(); return shiftDay(key,-((weekday+6)%7)); }
   function weekCounts(items,start,zone) { return Array.from({length:7},(_,i) => { const day = shiftDay(start,i); return {day,count:items.filter(item => { const e = effective(item); return !isDone(e) && (e.dueAt ? dateKey(e.dueAt,zone) : e.dueDate) === day; }).length}; }); }
   function isDone(item) { return item.completionOverride ? item.completionOverride === 'done' : ['submitted','graded'].includes(item.status); }
+  function combineDuplicates(keeper,alias) {
+    const merged={...keeper,firstSeen:Math.min(keeper.firstSeen||Infinity,alias.firstSeen||Infinity),lastSeen:Math.max(keeper.lastSeen||0,alias.lastSeen||0)};
+    if(!alias.eventAlias&&(alias.lastSeen||0)>(keeper.lastSeen||0)){
+      if(alias.dueRaw)for(const field of ['dueAt','dueDate','dueRaw','dateNote'])merged[field]=alias[field];
+      if(alias.status&&alias.status!=='unknown')merged.status=alias.status;
+    }
+    for(const [field,stamp] of [['dueOverride','dueOverrideUpdatedAt'],['completionOverride','completionUpdatedAt']]){
+      if((alias[stamp]||0)>(keeper[stamp]||0)||(!keeper[field]&&!keeper[stamp])){merged[field]=alias[field]??keeper[field];merged[stamp]=alias[stamp]||keeper[stamp];}
+    }
+    merged.remindedFor=keeper.remindedFor||alias.remindedFor;
+    return merged;
+  }
+  function deduplicateItems(items) {
+    const next={},groups=new Map();
+    for(const [key,original] of Object.entries(items)){
+      const item={...original,eventAlias:isEventAlias(original),title:assignmentTitle(original)};
+      next[key]=item;
+      const course=item.courseId||courseId(item.pageURL||item.url);
+      if(!course)continue;
+      const group=JSON.stringify([item.source,course,item.title.toLowerCase()]);
+      if(!groups.has(group))groups.set(group,[]);groups.get(group).push(key);
+    }
+    for(const keys of groups.values()){
+      // Strong native IDs are never merged with another different native ID.
+      for(const key of keys){
+        const item=next[key];if(!item||nativeAssignmentId(item))continue;
+        const type=item.type==='quiz'||/quizz/i.test(item.url)?'quiz':'assignment';
+        let matches=keys.filter(k=>k!==key&&next[k]&&!next[k].eventAlias&&(nativeAssignmentId(next[k])||item.eventAlias)&&
+          (item.eventAlias||type===(next[k].type==='quiz'||/quizz/i.test(next[k].url)?'quiz':'assignment')));
+        if(matches.length>1)matches=matches.filter(k=>(item.dueAt||item.dueDate)&&((next[k].dueAt||next[k].dueDate)===(item.dueAt||item.dueDate)));
+        if(matches.length!==1)continue;
+        const target=matches[0];next[target]=combineDuplicates(next[target],item);delete next[key];
+      }
+    }
+    return next;
+  }
   function mergeItems(existing, incoming, now = Date.now()) {
     const next = {...existing};
     for (const item of incoming) {
       if (!allowedURL(item.url) || !clean(item.title) || !['brightspace','gradescope','pearson'].includes(item.source)) continue;
       const id = assignmentId(item), old = next[id];
-      next[id] = {...item, id, firstSeen: old?.firstSeen || now, lastSeen: now, completionOverride: old?.completionOverride || '', dueOverride: old?.dueOverride || null, remindedFor:old?.remindedFor,
+      next[id] = {...item, id, firstSeen: old?.firstSeen || now, lastSeen: now, completionOverride: old?.completionOverride || '', dueOverride: old?.dueOverride || null, dueOverrideUpdatedAt:old?.dueOverrideUpdatedAt,completionUpdatedAt:old?.completionUpdatedAt,remindedFor:old?.remindedFor,
         previousDue: old && (old.dueAt !== item.dueAt || old.dueDate !== item.dueDate) ? old.dueAt || old.dueDate || '' : old?.previousDue || '',
         changedAt: old && (old.dueAt !== item.dueAt || old.dueDate !== item.dueDate) ? now : old?.changedAt || null};
     }
-    return next;
+    return deduplicateItems(next);
   }
   function dueReminders(state, now = Date.now()) {
     if (!state.settings.reminders) return [];
@@ -184,7 +234,7 @@
     }
     lines.push('END:VCALENDAR'); return lines.map(foldICS).join('\r\n') + '\r\n';
   }
-  const api = {HOSTS,PEARSON_HOSTS,HOMES,clean,allowedURL,canonicalURL,sourceFor,pageKind,courseId,hash,assignmentId,validZone,parseDue,zonedISO,emptyState,isDone,mergeItems,dueReminders,calendar,parseTerm,currentTerm,courseKey,migrateState,isCourseActive,effective,activeItems,manualDue,dateKey,shiftDay,weekStart,weekCounts};
+  const api = {HOSTS,PEARSON_HOSTS,HOMES,clean,allowedURL,canonicalURL,sourceFor,pageKind,canInspectPearson,courseId,hash,assignmentId,assignmentTitle,isEventAlias,deduplicateItems,validZone,parseDue,zonedISO,emptyState,isDone,mergeItems,dueReminders,calendar,parseTerm,currentTerm,courseKey,migrateState,isCourseActive,effective,activeItems,manualDue,dateKey,shiftDay,weekStart,weekCounts};
   root.DNCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

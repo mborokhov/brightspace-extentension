@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Due North \u2014 Purdue Assignment Tracker",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Current-semester assignments, editable deadlines, weekly workload and a calendar for Purdue Brightspace, Gradescope and MyLab Math.",
   "minimum_chrome_version": "120",
   "permissions": [

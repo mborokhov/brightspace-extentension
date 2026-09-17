@@ -25,7 +25,7 @@ chrome.permissions?.onRemoved?.addListener(()=>locked(configurePearson));
 function registerCourse(state,input){
   if(!input.id)return null;
   const key=C.courseKey(input.source,input.id),old=state.courses[key];
-  const title=C.clean(input.title,160),generic=/^(Course(?: page)?(?: [\w-]+)?|Assignments|Quizzes|Homework and Tests)$/i.test(title);
+  const title=C.clean(input.title,160),generic=/^(Course(?: page)?(?: [\w-]+)?|Assignments|Quizzes|Homework and Tests|MyLab Math|Course Home)$/i.test(title);
   const term=C.parseTerm(input.term)||C.parseTerm(title)||old?.term||null;
   const inactive=input.inactive===true||old?.inactive===true;
   const course={...old,key,id:input.id,source:input.source,title:generic&&old?.title?old.title:title||old?.title||`Course ${input.id}`,term,inactive,
@@ -33,7 +33,7 @@ function registerCourse(state,input){
   state.courses[key]=course;return course;
 }
 function canSync(state,url){
-  const kind=C.pageKind(url);if(!kind)return false;
+  const kind=C.pageKind(url)||(C.canInspectPearson(url)&&state.pages[url]?.kind==='list'?'list':'');if(!kind)return false;
   if(kind==='home')return true;
   const key=state.pages[url]?.courseKey||C.courseKey(C.sourceFor(url),C.courseId(url));
   return C.isCourseActive(state,key);
@@ -61,7 +61,8 @@ function sanitizedSnapshot(snapshot,sender,state){
   const links=(Array.isArray(snapshot.links)?snapshot.links:[]).slice(0,150).flatMap(link=>{
     const url=C.canonicalURL(link.url);return url&&C.pageKind(url)&&C.sourceFor(url)===source?[{url,title:C.clean(link.title,160),source,courseId:C.courseId(url)||C.clean(link.courseId,80)||course.id,term:C.parseTerm(link.term||link.title),inactive:!!link.inactive}]:[];
   });
-  return {source,pageURL,frameURL,items,links,course,kind:C.pageKind(frameURL)||C.pageKind(pageURL),title:C.clean(snapshot.title,160),login:!!snapshot.login,settled:!!snapshot.settled,embedded:!!snapshot.embedded};
+  const kind=C.pageKind(frameURL)||(C.canInspectPearson(frameURL)&&snapshot.kind==='list'&&items.length?'list':'');
+  return {source,pageURL,frameURL,items,links,course,kind,title:C.clean(snapshot.title,160),login:!!snapshot.login,settled:!!snapshot.settled,embedded:!!snapshot.embedded};
 }
 async function capture(snapshot,sender){
   const state=await read(),snap=sanitizedSnapshot(snapshot,sender,state),now=Date.now();
@@ -91,7 +92,7 @@ async function rescanOpenTabs(){
   for(const tab of await chrome.tabs.query({url:urls}))try{await chrome.tabs.sendMessage(tab.id,{type:'RESCAN'});}catch{}
 }
 async function dispatch(message,sender){
-  if(message?.type==='CONTENT_SETTINGS'&&sender.tab&&C.allowedURL(sender.url))return {settings:(await read()).settings};
+  if(message?.type==='CONTENT_SETTINGS'&&sender.tab&&C.allowedURL(sender.url)){const state=await read();return {settings:state.settings,syncOwned:!!state.job?.running&&state.job.tabId===sender.tab.id};}
   if(message?.type==='CAPTURE')return capture(message.snapshot,sender);
   if(!trusted(sender))throw new Error('Only the extension dashboard can perform this action');
   const state=await read();
@@ -113,9 +114,9 @@ async function dispatch(message,sender){
     }
     case 'SET_ITEM':{
       const item=state.items[message.id];if(!item)throw new Error('Assignment not found');
-      if(['done','todo',''].includes(message.completionOverride))item.completionOverride=message.completionOverride;
-      if(message.resetDue===true)item.dueOverride=null;
-      else if(message.date!==undefined)item.dueOverride=C.manualDue(C.clean(message.date,10),C.clean(message.time,5),state.settings.zone);
+      if(['done','todo',''].includes(message.completionOverride)){item.completionOverride=message.completionOverride;item.completionUpdatedAt=Date.now();}
+      if(message.resetDue===true){item.dueOverride=null;item.dueOverrideUpdatedAt=Date.now();}
+      else if(message.date!==undefined){item.dueOverride=C.manualDue(C.clean(message.date,10),C.clean(message.time,5),state.settings.zone);item.dueOverrideUpdatedAt=Date.now();}
       await save(state);return {ok:true};
     }
     case 'SET_SETTINGS':{

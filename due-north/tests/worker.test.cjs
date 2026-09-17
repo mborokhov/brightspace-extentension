@@ -127,3 +127,20 @@ test('archived-course exclusion survives a course page with ordinary navigation 
  await h.message({type:'CAPTURE',snapshot:snapshot({links:[{url:url+'/assignments',title:'Assignments'}]})},sender);
  assert.equal(Object.values(h.store.state.items).length,0);assert.equal(h.store.state.courses['gradescope:42'].inactive,true);
 });
+
+test('Pearson embedded list routes are accepted by observed layout and inherit the portal course',async()=>{
+ const h=harness(undefined,true),parent='https://mylabmastering.pearson.com/courses/123/menu/homework';
+ const owner={id:'test-extension',url:parent,frameId:0,tab:{id:500,url:parent}};
+ await h.message({type:'CAPTURE',snapshot:{pageURL:parent,title:'MyLab Math',course:{id:'123',title:'MA 265',term},items:[],links:[],embedded:true}},owner);
+ const frame='https://www.mathxl.com/Student/AssignmentManager.aspx',s={pageURL:frame,kind:'list',title:'Assignments',course:{title:'Course Home'},items:[{title:'Homework 1',url:frame,dueRaw:'09/06/26 11:59pm',status:'unknown'}],links:[]};
+ await h.message({type:'CAPTURE',snapshot:s},{...owner,url:frame,frameId:2});
+ const items=Object.values(h.store.state.items);assert.equal(items.length,1);assert.equal(items[0].course,'MA 265');assert.equal(items[0].courseId,'123');assert.equal(items[0].dueAt,'2026-09-07T03:59:00.000Z');
+ const player='https://www.mathxl.com/Student/Player.aspx';await h.message({type:'CAPTURE',snapshot:{...s,pageURL:player,items:[{...s.items[0],title:'Player content',url:player}]}},{...owner,url:player,frameId:2});
+ assert.equal(Object.values(h.store.state.items).length,1);
+});
+
+test('content settings disclose sync ownership only for the temporary sync tab',async()=>{
+ const h=harness();await h.message({type:'SYNC'});const job=h.store.state.job;
+ assert.equal((await h.message({type:'CONTENT_SETTINGS'},sender)).syncOwned,false);
+ assert.equal((await h.message({type:'CONTENT_SETTINGS'},{...sender,tab:{id:job.tabId}})).syncOwned,true);
+});

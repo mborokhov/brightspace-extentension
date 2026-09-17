@@ -58,6 +58,10 @@
   function courseInfo(roots,doc,url){
     const explicit=query(roots,'[data-course-name],.courseHeader--title,.course-header h1,.course-title,.d2l-navigation-s-title-container a')[0];
     let title=explicit?.getAttribute('data-course-name')||text(explicit);
+    if(C.sourceFor(url)==='pearson'){
+      const labelled=query(roots,'h1,h2,h3,h4,h5,a,[role="heading"],header,[role="banner"],span,div').map(text).filter(t=>t.length<180&&/^(?:Spring|Summer|Fall|Autumn)\s+20\d{2}\s+[A-Z]{2,}\s*\d{3,}/i.test(t)&&!/welcome|sign out|gradebook/i.test(t)).sort((a,b)=>a.length-b.length)[0];
+      if(labelled)title=labelled;
+    }
     if(!title)title=query(roots,'h1').map(text).find(t=>!/^(assignments?|quizzes|current quizzes|gradescope|brightspace|home|homework and tests)$/i.test(t))||C.clean(doc.title).replace(/\s*[|–-]\s*(Gradescope|Brightspace|MyLab).*$/i,'').replace(/^(Assignments|Quizzes|Homework and Tests)\s*[-–|]\s*/i,'');
     const id=C.courseId(url)||query(roots,'[data-course-id]')[0]?.getAttribute('data-course-id')||'';
     if(/^(assignments?|quizzes|gradescope|brightspace|home|homework and tests)$/i.test(title))title='';
@@ -105,6 +109,8 @@
       if(!anchor)anchor=[...nameCell.querySelectorAll('a,button,[data-assignment-name]')].find(a=>text(a)&&!/^(actions?|view|open|submit|start|continue|feedback|not submitted)$/i.test(text(a)));
       if(!anchor)continue;
       const title=anchor.getAttribute('data-assignment-name')||text(anchor),raw=labelDate(nameCell);
+      // Calendar widget links are summaries of assignments, not new assignments.
+      if(C.isEventAlias({source:'brightspace',title}))continue;
       const nativeLink=C.canonicalURL(anchor.getAttribute('href'),url);
       const positive=nativeLink&&/folders_submit_files|quizzing/i.test(nativeLink);
       if(!positive&&!raw&&!/not submitted/i.test(text(row)))continue;
@@ -139,11 +145,33 @@
       if(C.sourceFor(link)!=='pearson')continue;
       items.push(baseItem('pearson',course,link,url,title,raw,zone,now,{status,nativeId:row.getAttribute('data-assignment-id')||''}));
     }
+    // Course Home exposes compact date badges beside homework titles, outside a table.
+    const names=query(roots,'a,button,h2,h3,h4,h5,strong,span,[role="heading"],[class*="title"],[class*="name"]')
+      .filter(el=>!hidden(el)&&!el.closest('table,[role="table"]')&&/^(?:Homework|Assignment|Quiz|Test|Exam|Problem set)\s+\S/i.test(text(el))&&text(el).length<160&&!/\b(?:pts|score|and tests)\b|\d+\s*\/\s*\d+/i.test(text(el)));
+    const seen=new Set();
+    for(const name of names){
+      const title=text(name);let card=name.parentElement,raw='';
+      for(let depth=0;card&&depth<4;depth++,card=card.parentElement){
+        if(names.some(other=>other!==name&&text(other)!==title&&card.contains(other)))break;
+        const value=text(card),stamp=value.match(/\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+\d{1,2}(?:,?\s+20\d{2})?\s+(?:at\s+)?\d{1,2}:\d{2}\s*(?:AM|PM)\b/i);
+        raw=labelDate(card)||stamp?.[0]||'';
+        if(raw&&C.parseDue(raw,zone,now).dueAt)break;
+      }
+      if(!card||!raw||seen.has(title))continue;
+      const year=course.term?.match(/20\d{2}/)?.[0];
+      if(year&&!/20\d{2}/.test(raw))raw=raw.replace(/(\b[A-Za-z]+\s+\d{1,2})\b/,'$1, '+year);
+      const anchor=name.matches('a')?name:name.querySelector('a');
+      const link=C.canonicalURL(anchor?.getAttribute('href'),url)||C.canonicalURL(url);
+      if(C.sourceFor(link)!=='pearson')continue;
+      const completed=!!card.closest('[data-status="completed"],[aria-label="Completed"],#completed,.completed');
+      items.push(baseItem('pearson',course,link,url,title,raw,zone,now,{status:completed?'submitted':'not-submitted',nativeId:card.getAttribute('data-assignment-id')||''}));seen.add(title);
+    }
     return items;
   }
   function extract(doc,url,settings={},now=Date.now()){
     if(!C.allowedURL(url))throw new Error('Unsupported site');
-    const roots=allRoots(doc),zone=settings.zone||'America/New_York',source=C.sourceFor(url),kind=C.pageKind(url),course=courseInfo(roots,doc,url);
+    const roots=allRoots(doc),zone=settings.zone||'America/New_York',source=C.sourceFor(url),course=courseInfo(roots,doc,url);
+    let kind=C.pageKind(url);
     const login=!!query(roots,'input[type="password"]')[0]||/\/(login|signin|auth)(?:\/|$)/i.test(new URL(url).pathname),links=new Map();
     for(const el of query(roots,'a[href],d2l-course-card[href]')){
       if(hidden(el))continue;
@@ -153,9 +181,21 @@
       links.set(href,{url:href,title:C.clean(text(el)||el.getAttribute('text')||'Course',160),source,courseId:id,term,inactive});
     }
     const adapters={gradescope,brightspace,pearson};
-    const raw=login||!['course','list'].includes(kind)?[]:adapters[source](doc,roots,url,zone,now,course);
+    const raw=login||!(['course','list'].includes(kind)||C.canInspectPearson(url))?[]:adapters[source](doc,roots,url,zone,now,course);
+    if(!kind&&source==='pearson'&&raw.length)kind='list';
     const unique=new Map(raw.map(item=>[C.assignmentId(item),item]));
-    return {source,pageURL:C.canonicalURL(url),title:C.clean(doc.title,160),kind,login,course,embedded:source==='pearson'&&!!query(roots,'iframe')[0],items:[...unique.values()].slice(0,500),links:[...links.values()].slice(0,150),message:login?'Sign in to continue.':`${unique.size} assignments read.`};
+    const assignmentList=source==='pearson'&&query(roots,'tr,[role="row"]').some(row=>{const h=headersFor(row);return h.some(t=>/\bdue\b/i.test(t))&&h.some(t=>/assignment|homework/i.test(t));});
+    return {source,pageURL:C.canonicalURL(url),title:C.clean(doc.title,160),kind,login,course,assignmentList,embedded:source==='pearson'&&!!query(roots,'iframe')[0],items:[...unique.values()].slice(0,500),links:[...links.values()].slice(0,150),message:login?'Sign in to continue.':`${unique.size} assignments read.`};
   }
-  root.DNExtract={extract,statusOf,labelDate,allRoots,gradescopeDue,contextualTerm};
+  function openPearsonAssignments(doc,url){
+    if(!C.allowedURL(url)||new URL(url).hostname!=='mylabmastering.pearson.com'||!C.courseId(url))return false;
+    const target=query(allRoots(doc),'a,button,[role="link"]').find(el=>{
+      if(hidden(el)||el.closest('form,table,[role="table"]')||!/^Assignments$/.test(text(el)))return false;
+      const href=el.getAttribute('href'),destination=href?C.canonicalURL(href,url):'';
+      return !href||href==='#'||!!(destination&&C.sourceFor(destination)==='pearson'&&C.pageKind(destination)&&C.courseId(destination)===C.courseId(url));
+    });
+    if(!target)return false;
+    target.click();return true;
+  }
+  root.DNExtract={extract,statusOf,labelDate,allRoots,gradescopeDue,contextualTerm,openPearsonAssignments};
 })(globalThis);

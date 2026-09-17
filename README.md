@@ -6,4 +6,6 @@ Purdue assignment tracker for Brightspace, Gradescope, and MyLab Math. No API ke
 
 See [setup and usage](due-north/README.md), [privacy](due-north/PRIVACY.md), and [validation](due-north/TESTING.md).
 
-Version 0.2 adds editable deadlines, a weekly workload chart, a calendar, current-semester filtering, corrected assignment/quiz parsing, and optional MyLab Math collection. Google Calendar live sync is not connected. Pearson's signed-in layout still needs live verification.
+Version 0.2.1 includes editable deadlines, a weekly workload chart, a calendar, current-semester filtering, corrected assignment/quiz parsing, and optional MyLab Math collection. Google Calendar live sync is not connected. Pearson's signed-in layout still needs live verification.
+
+The latest patch fixes MyLab short-year dates and course-home cards, opens Assignments during background sync, and reconciles duplicate Brightspace calendar events with their assignments.

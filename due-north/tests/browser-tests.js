@@ -78,6 +78,32 @@ test('MyLab partial progress is pending; plain assignment names and completion i
  const s=extract('<table><tr><th>Assignment</th><th>Due</th><th>Progress</th></tr><tr><td>Homework 2</td><td>Sep 22, 2026</td><td>2 / 10</td></tr><tr><td>Homework 3</td><td>Sep 23, 2026</td><td><img title="Completed" src="data:,"></td></tr></table>','https://www.mathxl.com/Student/DoAssignments.aspx?courseId=123');
  equal(s.items.length,2);equal(s.items[0].status,'not-submitted');equal(s.items[1].status,'submitted');
 });
+test('MyLab screenshot table reads Due-first layout, short years and see-score links',()=>{
+ const s=extract('<header><span>Fall 2026 MA 26500-001 LEC</span><span>Sign Out</span></header><h1>MyLab Math</h1><table><thead><tr><th>Due</th><th>Assignment</th><th>Time Limit</th><th>Attempts</th><th>Gradebook Score</th></tr></thead><tbody><tr><td>09/06/26<br>11:59pm</td><td><span>Homework 1</span></td><td></td><td></td><td><a href="#">see score</a></td></tr><tr><td>09/19/26<br>11:59pm</td><td><span>Homework 11</span></td><td></td><td></td><td><a href="#">see score</a></td></tr></tbody></table>','https://mylabmastering.pearson.com/courses/123/menu/homework');
+ equal(s.course.title,'Fall 2026 MA 26500-001 LEC');equal(s.course.term,'Fall 2026');equal(s.items.length,2);equal(s.items[0].title,'Homework 1');equal(s.items[0].dueAt,'2026-09-07T03:59:00.000Z');equal(s.items[1].dueAt,'2026-09-20T03:59:00.000Z');equal(DNCore.isDone(s.items[0]),false);equal(s.items[0].url,s.pageURL);
+});
+test('MyLab home cards use date badges and course year without treating point totals as completion',()=>{
+ const card=(n,day)=>`<div class="card"><div><span>SEP</span><span>${day}</span><span>11:59 PM</span></div><div><strong>Homework ${n}</strong><div>Homework | 0/16 pts</div></div></div>`;
+ const s=extract(`<header><span>Fall 2026 MA 26500-001 LEC</span></header><h1>MyLab Math</h1><h2>Course Home</h2><button>Up next</button><button>Completed</button><section>${card(11,19)}${card(12,22)}</section>`,'https://mylabmastering.pearson.com/courses/123/menu/home');
+ equal(s.items.length,2);equal(s.items[0].title,'Homework 11');equal(s.items[0].dueAt,'2026-09-20T03:59:00.000Z');equal(s.items[0].dueRaw,'SEP 19, 2026 11:59 PM');equal(s.items[0].status,'not-submitted');equal(s.items[1].title,'Homework 12');
+});
+test('Pearson embedded lists are detected by headers on varying routes, while players are skipped',()=>{
+ const html='<table><tr><th>Due</th><th>Assignment</th></tr><tr><td>09/19/26 11:59pm</td><td>Homework 11</td></tr></table>';
+ const s=extract(html,'https://www.mathxl.com/Student/AssignmentManager.aspx');equal(s.kind,'list');equal(s.items.length,1);
+ equal(extract(html,'https://www.mathxl.com/Student/Player.aspx').items.length,0);
+});
+test('Brightspace calendar View Event links do not produce duplicate assignment records',()=>{
+ const s=extract('<div class="d2l-datalist-item"><a href="/d2l/le/calendar/42">View Event - Written Homework 11 - Due</a><div>Due on Sep 19, 2026 11:59 PM</div></div><table><tr><td><a href="/d2l/lms/dropbox/user/folders_submit_files.d2l?ou=42&db=11">Written Homework 11</a><div>Due on Sep 19, 2026 11:59 PM</div></td><td>Not Submitted</td></tr></table>',bs);
+ equal(s.items.length,1);equal(s.items[0].title,'Written Homework 11');
+});
+test('MyLab sync navigation selects only the same-course Assignments menu',()=>{
+ const url='https://mylabmastering.pearson.com/courses/123/menu/home';
+ const d=doc('<nav><a href="/courses/123/menu/assignments">Assignments</a><button>Start Quiz</button></nav>');let clicked=0;
+ d.querySelector('a').addEventListener('click',event=>{event.preventDefault();clicked++;});
+ equal(DNExtract.openPearsonAssignments(d,url),true);equal(clicked,1);
+ const unsafe=doc('<form><button>Assignments</button></form><a href="https://evil.test/">Assignments</a><a href="/courses/999/menu/assignments">Assignments</a>');
+ equal(DNExtract.openPearsonAssignments(unsafe,url),false);
+});
 const passed=results.filter(r=>r.pass).length;
 document.getElementById('test-summary').textContent=`${passed}/${results.length} passed${passed===results.length?' — all parser checks passed.':' — failures need attention.'}`;
 document.title=`${passed===results.length?'PASS':'FAIL'} · Due North DOM tests`;

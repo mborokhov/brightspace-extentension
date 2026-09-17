@@ -83,3 +83,34 @@ test('Pearson supports the course portal and embedded lists but never crawls pla
  assert.equal(C.canonicalURL('https://www.mathxl.com/Student/DoAssignments.aspx?courseId=123&token=secret'),'https://www.mathxl.com/Student/DoAssignments.aspx?courseId=123');
  assert.equal(C.courseId('https://mylabmastering.pearson.com/courses/123/menu/abc'),'123');
 });
+
+test('MyLab two-digit years and midnight dates parse in the configured zone',()=>{
+ assert.equal(C.parseDue('09/06/26 11:59pm','America/New_York',now).dueAt,'2026-09-07T03:59:00.000Z');
+ assert.equal(C.parseDue('09/06/26 12:00am','America/New_York',now).dueAt,'2026-09-06T04:00:00.000Z');
+ assert.equal(C.parseDue('02/30/26 11:59pm','America/New_York',now).dueAt,null);
+ assert.equal(C.canonicalURL(undefined,'https://www.mathxl.com/Student/DoAssignments.aspx'),'');
+});
+const bsItem=(extra={})=>item({source:'brightspace',courseId:'42',courseKey:'brightspace:42',title:'Written Homework 11',url:'https://purdue.brightspace.com/d2l/lms/dropbox/user/folders_submit_files.d2l?ou=42&db=11',pageURL:'https://purdue.brightspace.com/d2l/home/42',...extra});
+test('existing View Event copies merge into real assignments and preserve local edits',()=>{
+ const actual=bsItem({id:'actual'}),event=bsItem({id:'event',title:'View Event - Written Homework 11 - Due',url:'https://purdue.brightspace.com/d2l/le/calendar/42',dueOverride:C.manualDue('2026-09-25','18:00','America/New_York'),completionOverride:'done'});
+ const s=C.migrateState({schema:2,items:{actual,event}},now);
+ assert.deepEqual(Object.keys(s.items),['actual']);assert.equal(s.items.actual.title,'Written Homework 11');assert.deepEqual(s.items.actual.dueOverride,event.dueOverride);assert.equal(s.items.actual.completionOverride,'done');
+ assert.deepEqual(C.deduplicateItems(s.items),s.items);
+});
+test('duplicates stay distinct across courses, sites, native IDs and ambiguous same-name events',()=>{
+ const a=bsItem({id:'a'}),b=bsItem({id:'b',url:a.url.replace('db=11','db=12')}),event=bsItem({id:'e',title:'View Event - Written Homework 11 - Due',url:a.pageURL});
+ assert.equal(Object.keys(C.deduplicateItems({a,b,event})).length,3);
+ const other=bsItem({id:'other',courseId:'43'}),gs=item({id:'gs',title:a.title});
+ assert.equal(Object.keys(C.deduplicateItems({a,other,gs})).length,3);
+});
+test('same-course fallback records reconcile with native rows across repeated captures',()=>{
+ const fallback=bsItem({url:'https://purdue.brightspace.com/d2l/home/42'});
+ let items=C.mergeItems({},[fallback],now);const first=Object.keys(items)[0];items[first].dueOverride={dueAt:null,dueDate:'2026-09-25'};
+ items=C.mergeItems(items,[bsItem()],now+1000);assert.equal(Object.keys(items).length,1);assert.equal(Object.values(items)[0].dueOverride.dueDate,'2026-09-25');
+ items=C.mergeItems(items,[fallback],now+2000);assert.equal(Object.keys(items).length,1);
+});
+test('event-only names are cleaned without discarding assignments; later edits win on merge',()=>{
+ const event=bsItem({id:'e',title:'View Event - Written Homework 11 - Due',url:'https://purdue.brightspace.com/d2l/home/42',completionOverride:'done',completionUpdatedAt:20});
+ const single=C.deduplicateItems({e:event});assert.equal(single.e.title,'Written Homework 11');
+ const actual=bsItem({id:'a',completionOverride:'todo',completionUpdatedAt:30});assert.equal(C.deduplicateItems({e:single.e,a:actual}).a.completionOverride,'todo');
+});

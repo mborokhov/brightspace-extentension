@@ -1,6 +1,6 @@
 # Due North privacy information
 
-Version 0.2.0. Local browser storage only; no developer server, analytics, advertising, remote code, or cloud-synced storage.
+Version 0.2.1. Local browser storage only; no developer server, analytics, advertising, remote code, or cloud-synced storage.
 
 ## Stored information
 
@@ -14,7 +14,7 @@ Required hosts: `purdue.brightspace.com`, `www.gradescope.com`, and `gradescope.
 
 Optional MyLab Math hosts, enabled through the MyLab Math button: `mylabmastering.pearson.com`, `www.mathxl.com`, `mylab.pearson.com`, and `xlitemprod.pearsoncmg.com`. The reader can run inside embedded frames on these hosts. Unsupported player/submission pages are skipped.
 
-Readers inspect visible course/list information available to your signed-in session. Course metadata is discovered to determine the semester. Assignments from unselected or older courses are not saved. Sync opens only home pages and selected current course/list pages, up to 60 pages per run. Your browser and the school sites handle normal network traffic and authentication.
+Readers inspect visible course/list information available to your signed-in session. Course metadata is discovered to determine the semester. Assignments from unselected or older courses are not saved. Sync opens only home pages and selected current course/list pages, up to 60 pages per run. Temporary MyLab sync tabs can open the same-course Assignments menu; existing user tabs are not navigated. Your browser and the school sites handle normal network traffic and authentication.
 
 ## Permissions
 
