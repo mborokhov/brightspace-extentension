@@ -1,0 +1,18 @@
+{
+  "manifest_version": 3,
+  "name": "Due North — Purdue Assignment Tracker",
+  "version": "0.1.0",
+  "description": "A local assignment dashboard for Purdue Brightspace and Gradescope. Uses your signed-in pages; no API key or account required.",
+  "minimum_chrome_version": "120",
+  "permissions": ["storage", "alarms", "notifications"],
+  "host_permissions": ["https://purdue.brightspace.com/*", "https://www.gradescope.com/*", "https://gradescope.com/*"],
+  "background": {"service_worker": "background.js"},
+  "action": {"default_title": "Open Due North", "default_icon": {"16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png"}},
+  "icons": {"16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png"},
+  "content_scripts": [{
+    "matches": ["https://purdue.brightspace.com/*", "https://www.gradescope.com/*", "https://gradescope.com/*"],
+    "js": ["core.js", "extractors.js", "content.js"],
+    "run_at": "document_idle"
+  }],
+  "content_security_policy": {"extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'"}
+}
