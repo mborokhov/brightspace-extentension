@@ -34,16 +34,16 @@ test('year inference crosses December safely and is explicitly flagged',()=>{
 });
 const item=(overrides={})=>({source:'gradescope',title:'HW 1',course:'MA 161',courseId:'1',url:'https://www.gradescope.com/courses/1/assignments/42',pageURL:'https://www.gradescope.com/courses/1',status:'not-submitted',dueAt:'2026-09-18T03:59:00.000Z',dueDate:null,dateNote:'',lastSeen:now,...overrides});
 test('stable IDs deduplicate submission links and preserve personal marks on rescan',()=>{
- const initial=C.mergeItems({},[item()],now),id=Object.keys(initial)[0];initial[id].completionOverride='done';initial[id].archived=true;
+ const initial=C.mergeItems({},[item()],now),id=Object.keys(initial)[0];initial[id].completionOverride='done';initial[id].dueOverride=C.manualDue('2026-09-23','18:00','America/New_York');
  const next=C.mergeItems(initial,[item({url:'https://www.gradescope.com/courses/1/assignments/42/submissions/new',title:'HW 1 revised',dueAt:'2026-09-19T03:59:00.000Z'})],now+1000);
- assert.equal(Object.keys(next).length,1);assert.equal(next[id].completionOverride,'done');assert.equal(next[id].archived,true);assert.equal(next[id].previousDue,initial[id].dueAt);assert.equal(next[id].changedAt,now+1000);
+ assert.equal(Object.keys(next).length,1);assert.equal(next[id].completionOverride,'done');assert.deepEqual(next[id].dueOverride,initial[id].dueOverride);assert.equal(next[id].previousDue,initial[id].dueAt);assert.equal(next[id].changedAt,now+1000);
 });
 test('empty scan keeps records, unreadable changed date invalidates old reminder date',()=>{
  const initial=C.mergeItems({},[item()],now),id=Object.keys(initial)[0];assert.equal(Object.keys(C.mergeItems(initial,[],now)).length,1);
  assert.equal(C.mergeItems(initial,[item({dueAt:null})],now)[id].dueAt,null);
 });
 test('reminders skip stale, submitted, unknown-time, inferred-year, and notified items',()=>{
- const s=C.emptyState();s.settings.reminders=true;
+ const s=C.emptyState();s.settings.reminders=true;s.activeTerm='Fall 2026';s.courses['gradescope:1']={enabled:true,term:s.activeTerm};
  s.items={yes:item(),done:item({status:'submitted'}),stale:item({lastSeen:now-8*86400000}),inferred:item({dateNote:'Year inferred'}),sent:item({remindedFor:item().dueAt}),dateOnly:item({dueAt:null,dueDate:'2026-09-18'})};
  assert.equal(C.dueReminders(s,now).length,1);
 });
@@ -52,7 +52,34 @@ test('manual completion can override and reset source submission status',()=>{
  assert.equal(C.isDone(item({status:'submitted',completionOverride:''})),true);
 });
 test('ICS escapes content, uses stable UIDs, UTC/date-only dates and CRLF byte folding',()=>{
- const output=C.calendar([item({id:'abc',title:'Hello, world;\n'+ 'é'.repeat(90)}),item({id:'date',dueAt:null,dueDate:'2026-09-19'}),item({id:'skip',archived:true})],now);
+ const output=C.calendar([item({id:'abc',title:'Hello, world;\n'+ 'é'.repeat(90)}),item({id:'date',dueAt:null,dueDate:'2026-09-19'}),item({id:'skip',status:'submitted'})],now);
  assert.match(output,/DTSTART:20260918T035900Z/);assert.match(output,/DTSTART;VALUE=DATE:20260919/);assert.match(output,/UID:abc@due-north.local/);assert.match(output,/Hello\\, world\\;\\n/);assert.ok(!output.includes('UID:skip'));
  for(const line of output.split('\r\n')) assert.ok(Buffer.byteLength(line,'utf8')<=75);
+});
+
+test('semester labels, migration and rollover exclude unknown and older courses',()=>{
+ assert.equal(C.parseTerm('2026 Fall MA 161'),'Fall 2026');assert.equal(C.parseTerm('Autumn 2026'),'Fall 2026');assert.equal(C.parseTerm('MA 161'),null);
+ const s=C.migrateState({schema:1,items:{current:item({course:'MA 161 Fall 2026'}),old:item({courseId:'2',course:'Spring 2026'}),unknown:item({courseId:'3'})}},now);
+ assert.deepEqual(C.activeItems(s).map(i=>i.courseId),['1']);
+ C.migrateState(s,Date.parse('2027-01-20T12:00Z'));assert.equal(C.activeItems(s).length,0);
+});
+test('manual deadlines drive chart, calendar and reminders without overwriting source dates',()=>{
+ const edited=item({id:'edited',dueOverride:C.manualDue('2026-09-17','18:00','America/New_York')});
+ assert.equal(C.effective(edited).dueAt,'2026-09-17T22:00:00.000Z');assert.equal(edited.dueAt,item().dueAt);
+ const s=C.emptyState();s.activeTerm='Fall 2026';s.courses['gradescope:1']={enabled:true,term:s.activeTerm};s.items={edited};s.settings.reminders=true;
+ assert.equal(C.dueReminders(s,now)[0].dueAt,'2026-09-17T22:00:00.000Z');assert.match(C.calendar([edited],now),/DTSTART:20260917T220000Z/);
+ assert.throws(()=>C.manualDue('2026-02-30','12:00','America/New_York'));
+ assert.throws(()=>C.manualDue('2026-11-01','01:30','America/New_York'));
+});
+test('week counts respect local midnight, date-only overrides and completion',()=>{
+ const items=[item({dueAt:'2026-09-18T03:59:00Z'}),item({dueAt:'2026-09-18T04:00:00Z'}),item({dueOverride:{dueAt:null,dueDate:'2026-09-19'}}),item({status:'submitted'})];
+ assert.equal(C.weekStart(now,'America/New_York'),'2026-09-14');
+ assert.deepEqual(C.weekCounts(items,'2026-09-14','America/New_York').map(d=>d.count),[0,0,0,1,1,1,0]);
+});
+test('Pearson supports the course portal and embedded lists but never crawls players',()=>{
+ assert.equal(C.pageKind('https://mylabmastering.pearson.com/courses/123/menu/abc-def'),'list');
+ assert.equal(C.pageKind('https://www.mathxl.com/Student/DoAssignments.aspx?courseId=123'),'list');
+ assert.equal(C.pageKind('https://www.mathxl.com/Student/Player.aspx?homeworkId=456'),'');
+ assert.equal(C.canonicalURL('https://www.mathxl.com/Student/DoAssignments.aspx?courseId=123&token=secret'),'https://www.mathxl.com/Student/DoAssignments.aspx?courseId=123');
+ assert.equal(C.courseId('https://mylabmastering.pearson.com/courses/123/menu/abc'),'123');
 });

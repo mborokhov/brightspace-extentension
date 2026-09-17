@@ -1,27 +1,13 @@
-# Validation record — v0.1.0
+# Validation record — v0.2.0
 
 ## Verified
 
-- **25 Node tests passed** (`npm test`): URL/host boundaries, safe crawl routes, ISO and Rails-style datetime parsing, time-zone conversion, DST ambiguity, invalid dates, missing years/times, stable assignment identity, merge/preservation rules, changed deadlines, reminder exclusions/deduplication, UTF-8 iCalendar escaping/folding, serialized writes, message-sender validation, user-tab preservation, sign-in timeouts, queue recovery after worker recreation, local completion, setting changes, reset/collection pause, rendering delays after navigation, and continuous page mutations.
-- **11 in-browser DOM fixture tests passed** (`tests/browser.html`): Gradescope release/due/late distinctions, unlinked assignments, Brightspace inline and machine dates, availability-date exclusion, submission status, open shadow roots, hidden/duplicate rows, login detection, quiz summary links, and ungraded status handling.
-- **Static checks passed** (`npm run check`): JavaScript parses; manifest and all referenced assets exist; HTML has no inline scripts; no all-sites host permission.
-- **Interactive dashboard checks passed in the local sample preview**: search, course filtering, completion and Completed view, review filtering, archive/restore, settings dialog, invalid-zone rejection, and deadline display after changing time zone. The desktop layout was visually inspected.
+- **34 Node tests**: URL boundaries; safe page routes; timezone/DST/date parsing; stable IDs; local completion and deadline preservation; reminders and calendar export; current-semester migration and rollover; week counts across midnight; serialized writes; sender validation; sync queue restrictions/recovery; sign-in handling; user-tab preservation; optional Pearson registration; embedded-frame course association and parent-page waiting; collection timing and mutation handling.
+- **17 browser DOM fixtures**: release/due/late date selection including the supplied Gradescope timeline; Brightspace quiz names, inline due dates and populated Evaluation Status; Not Submitted assignments with JavaScript links; unreadable dates; course term sections; hidden rows, shadow roots and duplicates; MyLab due/status/progress columns, plain names, completion icons and stable IDs.
+- **Static checks**: JavaScript syntax, manifest/assets, no inline scripts, scoped host access. Git whitespace check passes.
+- **Interactive sample dashboard**: two navigation views; deadline editing updates list/chart/calendar; restore source date; completion and Completed filter; search; month navigation; current-course dialog excludes older courses; invalid timezone rejection; first-install empty state. Overview and Calendar visually inspected; no console errors observed during these checks.
 
-These tests use synthetic DOM fixtures and mocked Chrome APIs. They are not a claim of end-to-end success against a signed-in Purdue/Gradescope account or an installed production extension. Browser notification delivery depends on actual browser/OS settings.
-
-## Live-account acceptance check still required
-
-1. Load `extension/` unpacked in Chrome or Edge. Verify there are no extension errors.
-2. Sign into both supported sites and reload their tabs.
-3. Compare one Brightspace Assignments list, one Brightspace Quizzes list, and one Gradescope course table to the dashboard. Verify titles, course identification, source links, dates, times, and submission status.
-4. Include examples with no deadline, a personal extension if available, late-submission cutoffs, completed/unsubmitted work, and paginated lists.
-5. Run Sync courses. Check that each expected course/list appears in Sync coverage. A home-page visit alone does not prove all courses were scanned.
-6. Test expired login and MFA redirects: sign in normally, then retry sync. No credential should be pasted into the project or shared.
-7. Enable reminders and click Test notification. Check OS notification permissions.
-8. Export a calendar snapshot and verify a known deadline in the destination calendar’s timezone.
-9. Reload the extension and browser: local records should persist; a fresh install in a different profile should start empty.
-
-If a site layout does not match, adjust `extension/extractors.js`, add a **redacted** fixture, and rerun both test suites. Never include account data, session tokens, submitted answers, or a browser profile in the shared ZIP.
+Tests use synthetic DOM fixtures and mocked Chrome APIs. They do not establish end-to-end success against a signed-in account or prove that every site layout is covered. The supplied Pearson portal URL redirected to sign-in in the available browser, so its live assignment DOM could not be verified. Notification delivery and optional permission prompts need the installed Chrome/Edge extension.
 
 ## Reproduce
 
@@ -31,4 +17,16 @@ npm run check
 npm run preview
 ```
 
-Then visit `http://127.0.0.1:4173/tests/browser.html` in a current Chrome/Edge browser. All fixtures should pass. Previewing `extension/dashboard.html` outside the extension intentionally shows labelled sample data.
+Open `http://127.0.0.1:4173/tests/browser.html` for the DOM fixtures. The sample dashboard is at `/extension/dashboard.html`; append `?empty` to inspect a fresh installation's empty state. Sample edits stay in memory.
+
+## Live acceptance
+
+1. Reload the unpacked extension and your school tabs. Check for extension errors.
+2. Open current course lists and select unlabelled current classes in Courses. Confirm previous-semester courses are absent from the dashboard and sync queue.
+3. Compare Gradescope's right-hand due date (not release or late cutoff), Brightspace quiz names/Due on lines/Evaluation Status, and Not Submitted assignment rows.
+4. Edit a deadline, sync again, and confirm the edit persists in the list, chart, calendar and exported .ics. Restore the source date.
+5. Enable MyLab Math's optional access and reload Homework and Tests. Confirm the course if needed. Compare titles, due dates and status with the portal/embedded table. Unsupported layouts need a redacted fixture and adapter update.
+6. Check paginated lists, sign-in expiry and sync details. Try reminders while the browser is running; browser/OS settings may suppress notifications.
+7. Reload the extension; local choices should persist. A fresh browser profile starts empty. The source ZIP contains no user storage.
+
+Do not add credentials, account pages, submitted work, browser profiles, or private calendar exports to test fixtures or the shared project.

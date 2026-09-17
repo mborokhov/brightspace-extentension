@@ -1,39 +1,35 @@
 # Due North privacy information
 
-Version 0.1.0. This extension operates locally, without a developer-operated server, analytics, advertising, tracking, or remote code.
+Version 0.2.0. Local browser storage only; no developer server, analytics, advertising, remote code, or cloud-synced storage.
 
-## Data stored
+## Stored information
 
-In `chrome.storage.local`, scoped to the browser profile and extension:
+Assignment titles, course names/IDs/semester labels, supported source/page URLs, due dates and original deadline text, submission state, sync timestamps/diagnostics, local completion and deadline overrides, course choices, reminder markers, and settings are saved in `chrome.storage.local`. Content scripts cannot directly read this store.
 
-- Assignment names, course names and IDs, site names, and assignment/page URLs.
-- Due dates, original deadline text, parsing notes, and visible submission/graded status.
-- First/last collection times and the previous deadline when a deadline changes.
-- Local completion/archiving choices and notification deduplication markers.
-- Discovered course/list URLs, sync timing, page counts, and short sync diagnostics.
-- Time zone, reminder preferences, and whether page collection is enabled.
-
-The extension does not intentionally collect credentials, cookie values, submitted answers, full assignment descriptions, grades beyond recognizing a graded submission state, names/email addresses of users, or unrelated browsing history. It does not fetch private API endpoints.
+The extension does not collect passwords, cookie values, submitted answers, full assignment descriptions, account email addresses, or unrelated browsing history. Displayed grades are inspected only to recognize completion; numerical scores are not saved. No private API endpoints are fetched. Unneeded URL query parameters and fragments are removed before storage.
 
 ## Site access
 
-Content scripts run only on `https://purdue.brightspace.com/*`, `https://www.gradescope.com/*`, and `https://gradescope.com/*`. They read course and assignment-list DOM content already available to the signed-in user. Unsupported submission/edit pages are skipped. A user-initiated sync opens allowed, discovered list/course pages in temporary tabs. Normal requests and authentication are handled by the school sites and browser.
+Required hosts: `purdue.brightspace.com`, `www.gradescope.com`, and `gradescope.com` over HTTPS.
 
-Course assignments and page links remain on the device. The extension never transmits them to a developer service. A calendar export creates a local file containing assignment information; importing or sharing it is the user’s choice. Sharing the original code ZIP does not share extension storage.
+Optional MyLab Math hosts, enabled through the MyLab Math button: `mylabmastering.pearson.com`, `www.mathxl.com`, `mylab.pearson.com`, and `xlitemprod.pearsoncmg.com`. The reader can run inside embedded frames on these hosts. Unsupported player/submission pages are skipped.
+
+Readers inspect visible course/list information available to your signed-in session. Course metadata is discovered to determine the semester. Assignments from unselected or older courses are not saved. Sync opens only home pages and selected current course/list pages, up to 60 pages per run. Your browser and the school sites handle normal network traffic and authentication.
 
 ## Permissions
 
-- **Site permissions:** Read the supported course/list pages and open them during sync.
-- **storage:** Save the local dashboard state. Cloud-synced storage is not used; content scripts cannot directly read the saved store.
-- **alarms:** Periodic deadline checks and recovery for stalled sync pages.
-- **notifications:** Optional desktop reminders. Assignment titles may be visible in OS notification surfaces.
+- Scoped host access: read supported pages and open them during sync.
+- `storage`: save local records and preferences.
+- `alarms`: check deadlines and stalled syncs.
+- `notifications`: optional desktop reminders; assignment titles can appear in OS notifications.
+- `scripting`: register the optional Pearson reader after you grant its host access.
 
-The extension does not request access to all websites, passwords, cookies, clipboard, geolocation, camera, microphone, or browsing history. Tabs are opened through the tabs API using scoped host permissions; there is no broad `tabs` permission.
+No all-sites, passwords, cookies, clipboard, geolocation, camera, microphone, browsing-history, or broad tabs permission is requested.
 
-## Control and deletion
+## Sharing and control
 
-Pause collection in Settings. Clearing local data resets the workspace and pauses collection so already-open tabs cannot immediately restore it. Re-enable collection when ready. Uninstalling deletes extension local storage. Exported calendar files and calendars into which they were imported are separate and must be managed by the user.
+The project ZIP contains code and synthetic examples, not your browser storage. Calendar export creates a local file containing assignment information; importing or sharing that file is your choice. There is no Google Calendar connection in this release.
 
-Use a separate browser profile for each school account. This version does not detect account identity and therefore does not automatically partition records when a user changes school logins within the same profile.
+Settings lets you pause collection or clear all local data. Clearing pauses collection so open tabs cannot immediately restore records. Old-semester records from previous versions stay local but are excluded from the dashboard and sync. Uninstalling deletes extension storage. Exported files and imported calendar events must be managed separately.
 
-This document describes the supplied source code. If you distribute a modified version, update this information to match its behavior.
+Use a separate browser profile for each school account. The extension does not identify account ownership or automatically separate accounts used in the same profile.

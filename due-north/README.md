@@ -1,63 +1,58 @@
 # Due North
 
-A shareable Chrome/Edge extension that brings Purdue Brightspace and Gradescope assignments into one local dashboard. **No API key, server, subscription, or extra login.** Each user signs into the school sites normally.
+A shareable Chrome/Edge extension for Purdue Brightspace, Gradescope, and MyLab Math. No API key, server, or build step. Each person uses their own school login and browser storage.
 
-**Version 0.1.0 · beta.** Core logic, the background worker, synthetic DOM fixtures, and the dashboard have been tested. The current live Purdue and Gradescope page layouts still need validation with a signed-in student account. Check collected deadlines against the original sites before relying on them.
+**Version 0.2.0 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
 
-## Install — no programming tools required
+## Install or update
 
-1. Extract `due-north-v0.1.0.zip` into a permanent folder.
-2. Open `chrome://extensions` in Chrome or `edge://extensions` in Edge.
-3. Enable **Developer mode**.
-4. Click **Load unpacked** and choose the **extension** folder containing `manifest.json`.
-5. Pin Due North from the Extensions menu. Click the arrow icon to open the dashboard.
-6. Reload any Brightspace/Gradescope tabs you had open before installation.
+1. Download/extract the project into a permanent folder.
+2. Open `chrome://extensions` or `edge://extensions` and enable **Developer mode**.
+3. Choose **Load unpacked**, then select `due-north/extension` (or `extension` inside the project ZIP).
+4. Select the **folder**, not `manifest.json`. The folder chooser may show only the `icons` subfolder; this is normal.
+5. Pin Due North and open it. Reload any school tabs already open.
 
-You do **not** need Node, Python, an API key, or a build step to install this extension. Keep the extracted folder; the browser loads the files from there. Managed browsers may disallow unpacked extensions. Firefox/Safari are not supported by this package.
+For an existing installation pointing at this folder, click **Reload** on its extension card. If you moved the source folder, load the new `extension` folder. Avoid leaving two copies enabled. Keep the source folder in place while using the extension.
 
-## First collection
+## Collect current assignments
 
-1. Sign in to Purdue Brightspace and Gradescope, including your usual MFA.
-2. Visit each course. In Brightspace, open the **Assignments** and **Quizzes** lists. In Gradescope, open the course’s assignment table. Give the page several seconds to load.
-3. Open additional pages in paginated lists and expand sections yourself. The extension only sees rows loaded into the page.
-4. Check **Sync coverage** in the dashboard. Compare titles, times, and submission states with the original pages.
-5. Use **Sync courses** to revisit discovered course/list links. A run checks at most 60 pages in temporary background tabs. Sign-in redirects may leave a tab open; sign in there and retry.
+1. Sign into Brightspace and Gradescope normally.
+2. Visit your course lists. Brightspace: open **Assignments** and **Quizzes**. Gradescope: open each course assignment table. Allow several seconds to render; expand sections and visit additional pages yourself.
+3. In Due North, open **Courses**. Courses labelled with the current semester are included automatically. If a site does not show a semester, confirm that course here once. Older or inactive courses are excluded from collection, sync, charts, and export.
+4. Click **Sync** to revisit discovered current course/list pages. **Sync details** shows coverage and failures.
+5. For MyLab Math, click **MyLab Math** and grant its optional site access. Open your course's **Homework and Tests** page, reload it, then confirm the course in **Courses** if needed. Embedded lists on supported Pearson hosts are included.
 
-The initial home-page scan may discover your courses automatically. If a course or tool is missing, visit its assignment/quiz list manually. Sync has no special access to hidden, unreleased, or unlisted information.
+A sync checks up to 60 pages in background tabs. It does not start assignments or quizzes. Sign-in tabs may stay open so you can sign in normally and retry. Pages/sections that are not loaded must be opened manually.
 
-## Included features
+Semester detection uses Spring (January–May), Summer (June–July), and Fall (August–December), in the configured course time zone. It checks course labels, not assignment due dates. Unlabelled courses are excluded until you select them. On upgrade from v0.1, existing records with no semester label require this confirmation; old records remain stored but hidden.
 
-- Brightspace assignment/quiz list and Gradescope assignment table readers.
-- A combined dashboard with course/search filters, next-week view, overdue count, and date-review view.
-- Source links, readable sync coverage, stale-data labels, and changed-deadline notices.
-- Personal completion marks and reversible archiving. These never modify the school sites.
-- Optional desktop reminders using saved deadlines while the browser is running.
-- `.ics` calendar **snapshot** export. It is not a live calendar subscription.
-- Configurable course time zone, collection pause, and local data reset.
+## Dashboard
 
-## Share it
+- **Overview:** a Monday–Sunday chart of incomplete assignments, week navigation, and a searchable assignment list. Click a bar to filter by day.
+- **Calendar:** month navigation and assignments on their due dates. Click an assignment to edit its deadline.
+- **Edit date:** sets a local deadline, optionally without a time. Later syncs preserve it. **Use source date** restores the latest source deadline. Edits affect the chart, calendar, reminders, and export; they never modify the school site.
+- **Completion:** checkboxes are local overrides. **Use source status** removes an override. On Brightspace quiz lists, any populated Evaluation Status cell means completed; attempts alone do not. “Not Submitted” assignments stay pending.
+- **Dates:** Gradescope uses the right-hand due date, excluding the release date and late cutoff. Brightspace uses the “Due on” line under the assignment/quiz name.
+- **Export .ics:** downloads a snapshot of all current-course incomplete assignments with readable dates. Google Calendar live sync is not implemented yet. Importing an .ics file does not create ongoing synchronization.
 
-Send friends the **original project ZIP**. They extract it, load its `extension` folder, and use their own browser profiles and school logins. User data lives in browser storage, not the project folder. This ZIP contains code, icons, documentation, tests, and explicitly labelled sample preview data; it contains no real assignments, credentials, cookies, or tokens.
+There are two navigation views: Overview and Calendar. Settings, course selection, and sync details open in dialogs.
 
-This edition supports `purdue.brightspace.com`, `www.gradescope.com`, and `gradescope.com`. Other schools’ Brightspace hosts require an explicit code/permission update.
+## Share
 
-For one-click public installation, the extension would need to be submitted to Chrome Web Store/Edge Add-ons and pass review. This package has not been published to a store.
+Send the project ZIP or repository link. Friends load their own `extension` folder and use their own browser profile. The source contains no real assignments, cookies, credentials, or browser storage. No programming tools are needed for installation. This is an unpacked extension, not a published Chrome/Edge store listing. Firefox and Safari are not supported.
 
-## Dates, accounts, and limitations
+## Settings and limits
 
-- **Time zone:** Defaults to `America/New_York`. Match this to the timezone shown by your course sites. Explicit offsets in machine timestamps take precedence. Displayed dates use the dashboard’s configured zone.
-- **Missing year/time:** A missing year is inferred from the nearest date and flagged; no reminder is sent for it. A missing time remains date-only. Unrecognized or DST-ambiguous dates need source review.
-- **Completion:** Submitted/graded rows can count as done. An unknown status stays open. Your checkbox is a local override; **Use source** removes it.
-- **Duplicates:** An assignment listed on both platforms stays as separate records. Archive a duplicate if appropriate; automatic cross-platform merging can hide conflicting deadlines.
-- **Disappearing records:** A scan does not delete unseen assignments. Archive old work yourself. This avoids losing records because a page only loaded partially.
-- **No full-coverage guarantee:** It does not parse syllabus PDFs, announcements, third-party homework sites, or every Brightspace layout. Closed shadow roots and unusual/custom list markup can need adapter changes.
-- **Session expiry:** Collection requires a normal authenticated browser session. There is no password, cookie extraction, login automation, or MFA bypass.
-- **Account separation:** Use one school account per browser profile. Clear local data before switching accounts. Clearing pauses collection, so old open tabs do not immediately repopulate it. Re-enable collection in Settings after changing accounts.
-- **Notifications:** Opt-in, once per due date, approximately once per minute while the browser is running. Stale (>7 days), completed, archived, date-only, inferred-year, and past-due records are excluded. OS settings can suppress notifications.
+- Time zone defaults to `America/New_York`. Match the zone shown on your course pages. Explicit timestamp offsets take precedence. Local edits preserve their selected instant if you later change the display time zone.
+- Missing times remain date-only; missing years are inferred and cannot trigger reminders until corrected. Unreadable deadlines remain undated and can be edited.
+- Reminders are opt-in, checked about once per minute while the browser runs. Completed, past-due, undated/date-only, inferred-year, and more-than-seven-days-stale records are excluded. OS settings can suppress notifications.
+- Partial scans do not delete assignments that disappeared from the page. Cross-platform duplicates remain separate; mark an unwanted duplicate complete locally.
+- Only loaded list rows are read. Syllabus PDFs, announcements, closed shadow roots, and unsupported/custom layouts are outside coverage. MyLab Math support currently targets visible assignment tables/cards with due labels on the supported hosts; live verification of your signed-in layout remains necessary.
+- Use one school account per browser profile. Before switching accounts, clear local data in Settings. Clearing pauses collection; enable it again after signing into the new account.
 
-## Develop and test
+## Develop
 
-There are no runtime or development dependencies to install. Node 20+ is needed only for these developer commands:
+No package dependencies are required. Node 20+ is only needed for developer commands:
 
 ```sh
 npm test
@@ -65,34 +60,10 @@ npm run check
 npm run preview
 ```
 
-Preview: `http://127.0.0.1:4173/extension/dashboard.html`
+Dashboard preview: `http://127.0.0.1:4173/extension/dashboard.html`
 
-DOM fixture tests: `http://127.0.0.1:4173/tests/browser.html`
+Parser fixtures: `http://127.0.0.1:4173/tests/browser.html`
 
-Opening the dashboard outside the installed extension shows an **interactive sample preview**, with a prominent banner. Preview changes stay in memory, do not scrape sites, and do not send notifications. A real extension installation starts with an empty workspace.
+Outside the installed extension, the dashboard shows labelled sample data. Preview edits stay in memory. Real installations start empty. Reload the extension and school tabs after changing its files.
 
-After editing extension files, click **Reload** on its Extensions page, then reload relevant school tabs. Existing local records normally persist across reloads. Removing the extension deletes its local storage.
-
-## Project layout
-
-```text
-extension/                 Load this folder into Chrome/Edge
-  manifest.json            Scoped permissions and Manifest V3 entry points
-  core.js                  URL allowlist, date parsing, merge rules, reminders, ICS
-  extractors.js            DOM adapters for the two sites
-  content.js               Debounced page collection
-  background.js            Serialized storage, persisted sync queue, notifications
-  dashboard.*              Local dashboard and labelled sample preview
-  help.html                Offline setup, sharing, and privacy guide
-tests/                     Node tests and browser DOM fixtures
-scripts/                   Validation and localhost preview server
-```
-
-See `TESTING.md` for validation scope and the remaining live-account checklist, and `PRIVACY.md` for data handling. MIT licensed. Independent project, not affiliated with Purdue, D2L, or Gradescope.
-
-## Reference documentation
-
-- [Chrome content scripts](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts)
-- [Chrome local storage](https://developer.chrome.com/docs/extensions/reference/api/storage)
-- [Loading an unpacked extension](https://developer.chrome.com/docs/extensions/get-started/tutorial/hello-world)
-- [Gradescope student dashboard](https://guides.gradescope.com/hc/en-us/articles/33110246442637-Student-Dashboard)
+`extension/` contains the distributable app; `tests/` contains Node and browser fixtures; `scripts/` contains static checks and the preview server. See [TESTING.md](TESTING.md) and [PRIVACY.md](PRIVACY.md). MIT licensed. Independent project, not affiliated with Purdue, D2L, Gradescope, or Pearson.
