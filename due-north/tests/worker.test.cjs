@@ -3,10 +3,11 @@ function harness(saved,pearson=false) {
   const events={};const event=name=>({addListener:fn=>{events[name]=fn;}});
   const store=saved?structuredClone(saved):{},tabs=new Map(),removed=[],notifications=[],created=[];
   let nextTab=1;
+  const rescans=[],updates=[],rescan={handle:async()=>({readerVersion:3})};
   const scripts=[];const chrome={permissions:{contains:async()=>pearson,onRemoved:event('permissionRemoved')},scripting:{getRegisteredContentScripts:async()=>scripts,unregisterContentScripts:async()=>{scripts.length=0;},registerContentScripts:async value=>scripts.push(...value)},runtime:{id:'test-extension',getURL:p=>'chrome-extension://test-extension/'+p,onMessage:event('message'),onInstalled:event('installed'),onStartup:event('startup')},
     storage:{local:{get:async key=>structuredClone({[key]:store[key]}),set:async value=>Object.assign(store,structuredClone(value)),setAccessLevel:async()=>{}}},
     action:{onClicked:event('action')},alarms:{create:async()=>{},onAlarm:event('alarm')},
-    tabs:{query:async()=>[],create:async options=>{const tab={...options,id:nextTab++};tabs.set(tab.id,tab);created.push(tab);return tab;},get:async id=>{if(!tabs.has(id))throw Error('No tab');return tabs.get(id);},update:async()=>{},remove:async id=>{removed.push(id);tabs.delete(id);},onRemoved:event('removed')},
+    tabs:{query:async options=>[...tabs.values()].filter(t=>!options?.url||(Array.isArray(options.url)?options.url:[options.url]).some(u=>t.url?.startsWith(u.replace(/\*$/,'')))),sendMessage:async(id,message)=>{rescans.push({id,message});return rescan.handle(id,message);},create:async options=>{const tab={...options,id:nextTab++};tabs.set(tab.id,tab);created.push(tab);return tab;},get:async id=>{if(!tabs.has(id))throw Error('No tab');return tabs.get(id);},update:async(id,change)=>{updates.push({id,change});if(tabs.has(id))Object.assign(tabs.get(id),change);},onUpdated:event('updated'),remove:async id=>{removed.push(id);tabs.delete(id);},onRemoved:event('removed')},
     notifications:{create:async(id,options)=>{notifications.push({id,options});},onClicked:event('notification')}
   };
   const context=vm.createContext({chrome,console,URL,Date,Intl,TextEncoder,setTimeout,clearTimeout});
@@ -15,7 +16,7 @@ function harness(saved,pearson=false) {
   const admin={id:'test-extension',url:'chrome-extension://test-extension/dashboard.html'};
   const message=(payload,sender=admin)=>new Promise(resolve=>events.message(payload,sender,resolve));
   const settle=()=>message({type:'GET_STATE'});
-  return {store,tabs,scripts,removed,notifications,created,events,message,settle,admin,context};
+  return {store,tabs,scripts,rescans,updates,rescan,removed,notifications,created,events,message,settle,admin,context};
 }
 const C=require('../extension/core.js'),term=C.currentTerm();
 const url='https://www.gradescope.com/courses/42';
@@ -60,7 +61,7 @@ test('SSO redirect times out, reports sign-in requirement and leaves external si
 test('same-domain login page is preserved while queue continues',async()=>{
  const h=harness();await h.message({type:'SYNC'});const job=h.store.state.job;
  await h.message({type:'CAPTURE',snapshot:{pageURL:job.currentURL,login:true,settled:true,items:[],links:[],title:'Login'}},{id:'test-extension',url:job.currentURL,tab:{id:job.tabId}});
- assert.ok(!h.removed.includes(job.tabId));assert.match(h.store.state.job.errors[0],/Sign in/);
+ assert.ok(!h.removed.includes(job.tabId));assert.match(h.store.state.job.errors[0],/Sign[- ]in/);
 });
 test('sync queue resumes through content events after worker recreation',async()=>{
  const h=harness();await h.message({type:'SYNC'});const s=h.store.state,job=s.job;
@@ -143,4 +144,74 @@ test('content settings disclose sync ownership only for the temporary sync tab',
  const h=harness();await h.message({type:'SYNC'});const job=h.store.state.job;
  assert.equal((await h.message({type:'CONTENT_SETTINGS'},sender)).syncOwned,false);
  assert.equal((await h.message({type:'CONTENT_SETTINGS'},{...sender,tab:{id:job.tabId}})).syncOwned,true);
+});
+
+function singlePageJob(){
+ const state=C.emptyState();state.courses['gradescope:42']={key:'gradescope:42',source:'gradescope',id:'42',title:'Course',term,enabled:true};
+ state.job={runId:'run-one',sources:['gradescope'],running:true,queue:[],seen:[url],currentURL:url,tabId:7,tabOwned:true,checked:0,errors:[],results:{},itemIds:{},changed:0,startedPageAt:Date.now()};
+ return state;
+}
+test('successful assignment reads produce counts and a platform timestamp; discovery alone does not',async()=>{
+ const h=harness({state:singlePageJob()});h.tabs.set(7,{id:7,url,active:false});
+ await h.message({type:'CAPTURE',snapshot:snapshot()},{...sender,tab:{id:7}});
+ assert.match(h.store.state.job.note,/1 assignments checked/);assert.equal(h.store.state.job.changed,1);assert.ok(h.store.state.sources.gradescope.lastSuccess);
+ const prev=h.store.state.sources.gradescope.lastSuccess;
+ await h.message({type:'CAPTURE',snapshot:snapshot({pageURL:'https://www.gradescope.com/',course:{},items:[]})},{...sender,url:'https://www.gradescope.com/'});
+ assert.equal(h.store.state.sources.gradescope.lastSuccess,prev);
+});
+test('unknown layouts, unreadable dates and partial pages cannot report a successful sync',async()=>{
+ for(const extra of [{items:[]},{items:[{...snapshot().items[0],dueRaw:'See timetable'}]},{quality:{partial:true}},{quality:{unreadableRows:1}}]){
+  const state=singlePageJob();state.sources.gradescope={lastSuccess:123};const h=harness({state});h.tabs.set(7,{id:7,url});
+  await h.message({type:'CAPTURE',snapshot:snapshot(extra)},{...sender,tab:{id:7}});
+  assert.equal(h.store.state.sources.gradescope.lastSuccess,123);assert.ok(h.store.state.job.errors.length);assert.notEqual(h.store.state.pages[url].outcome,'updated');
+ }
+});
+test('explicit empty lists are valid; sign-in failures retain the old success timestamp',async()=>{
+ const h=harness({state:singlePageJob()});h.tabs.set(7,{id:7,url});
+ await h.message({type:'CAPTURE',snapshot:snapshot({items:[],quality:{explicitEmpty:true}})},{...sender,tab:{id:7}});
+ assert.equal(h.store.state.pages[url].outcome,'empty');assert.ok(h.store.state.sources.gradescope.lastSuccess);
+ const success=h.store.state.sources.gradescope.lastSuccess;
+ await h.message({type:'CAPTURE',snapshot:snapshot({login:true,items:[]})},sender);assert.equal(h.store.state.sources.gradescope.lastSuccess,success);assert.equal(h.store.state.sources.gradescope.outcome,'login');
+});
+test('repeated captures report unchanged and preserve local corrections; source changes remain visible',async()=>{
+ const h=harness();await h.message({type:'CAPTURE',snapshot:snapshot()},sender);const id=Object.keys(h.store.state.items)[0];
+ await h.message({type:'SET_ITEM',id,date:'2026-10-01',time:'18:00'});
+ for(let n=0;n<3;n++)await h.message({type:'CAPTURE',snapshot:snapshot()},sender);
+ assert.equal(Object.keys(h.store.state.items).length,1);assert.equal(h.store.state.pages[url].outcome,'unchanged');assert.equal(h.store.state.items[id].dueOverride.dueAt,'2026-10-01T22:00:00.000Z');
+ const changed=snapshot();changed.items[0].dueRaw='September 25, 2026 11:59 PM';await h.message({type:'CAPTURE',snapshot:changed},sender);
+ assert.ok(h.store.state.items[id].deadlineChange);assert.equal(C.sameDeadline(h.store.state.items[id].overrideSourceDue,h.store.state.items[id]),false);
+});
+test('sync reuses matching open tabs without navigating or closing them',async()=>{
+ const h=harness(),home=C.HOMES[0];h.tabs.set(500,{id:500,url:home,active:true});await h.message({type:'SYNC'});
+ const job=h.store.state.job;assert.equal(job.tabId,500);assert.equal(job.tabOwned,false);assert.equal(h.created.length,0);
+ await h.message({type:'CAPTURE',snapshot:{pageURL:home,title:'Home',items:[],links:[],settled:true,requestId:job.runId}},{id:'test-extension',url:home,tab:{id:500}});
+ assert.equal(h.store.state.job.reused,1);assert.ok(!h.removed.includes(500));assert.equal(h.updates.length,0);
+});
+test('stale readers get a fresh temporary tab without changing the user tab',async()=>{
+ const h=harness();h.tabs.set(500,{id:500,url:C.HOMES[0],active:true});h.rescan.handle=async()=>({readerVersion:3,needsReload:true});await h.message({type:'SYNC'});await h.settle();await h.settle();
+ assert.equal(h.created.length,1);assert.equal(h.store.state.job.tabOwned,true);assert.equal(h.tabs.get(500).url,C.HOMES[0]);assert.ok(!h.removed.includes(500));
+});
+test('recent successes are skipped while force refresh bypasses the cache',async()=>{
+ const state=C.emptyState();for(const home of C.HOMES)state.pages[home]={url:home,kind:'home',source:C.sourceFor(home),outcome:'discovered',lastSuccess:Date.now()};
+ const h=harness({state});await h.message({type:'SYNC'});assert.equal(h.created.length,0);assert.equal(h.store.state.job.skipped,2);assert.equal(h.store.state.job.running,false);
+ await h.message({type:'SYNC',force:true});assert.equal(h.created.length,1);assert.equal(h.store.state.job.force,true);
+});
+test('stop and clear never close borrowed tabs; temporary error tabs are closed',async()=>{
+ for(const type of ['STOP_SYNC','CLEAR']){const h=harness();h.tabs.set(500,{id:500,url:C.HOMES[0],active:true});await h.message({type:'SYNC'});await h.message({type});assert.ok(!h.removed.includes(500));}
+ const h=harness();await h.message({type:'SYNC'});const id=h.store.state.job.tabId;h.tabs.get(id).url='https://purdue.brightspace.com/d2l/error/500';await h.message({type:'STOP_SYNC'});assert.ok(h.removed.includes(id));
+});
+test('Brightspace group links retain context and fall back after a server error',async()=>{
+ const h=harness(),page='https://purdue.brightspace.com/d2l/lms/dropbox/user/folders_list.d2l?ou=42',link='https://purdue.brightspace.com/d2l/lms/dropbox/user/folder_submit_files.d2l?ou=42&db=11&grpid=7';
+ await h.message({type:'CAPTURE',snapshot:{pageURL:page,course:{id:'42',title:'Course',term},items:[{title:'Group homework',url:link,linkVersion:2,dueRaw:'Sep 25, 2026 11:59 PM'}],links:[]}},{id:'test-extension',url:page,tab:{id:500}});
+ const id=Object.keys(h.store.state.items)[0];await h.message({type:'OPEN_ASSIGNMENT',id});const tab=h.created.at(-1);assert.match(tab.url,/grpid=7/);
+ h.events.updated(tab.id,{url:'https://purdue.brightspace.com/d2l/error/500'},{});await h.settle();assert.equal(h.updates.at(-1).change.url,page);
+});
+
+
+test('timezone display changes preserve the source-date baseline without inventing a conflict',async()=>{
+ const h=harness();await h.message({type:'CAPTURE',snapshot:snapshot()},sender);const id=Object.keys(h.store.state.items)[0];
+ await h.message({type:'SET_ITEM',id,date:'2026-10-01',time:'18:00'});
+ const custom=h.store.state.items[id].dueOverride;
+ await h.message({type:'SET_SETTINGS',settings:{zone:'America/Los_Angeles',leadHours:6,reminders:false}});
+ const item=h.store.state.items[id];assert.equal(C.sameDeadline(item.overrideSourceDue,item),true);assert.deepEqual(item.dueOverride,custom);
 });

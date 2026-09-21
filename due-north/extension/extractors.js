@@ -84,7 +84,7 @@
     if(dueCell)return labelDate(dueCell)||normal;
     return labelDate(row);
   }
-  function baseItem(source,course,url,pageURL,title,raw,zone,now,extra={}){return {source,title:C.clean(title,250),course:course.title,courseId:course.id,term:course.term,url,pageURL:C.canonicalURL(pageURL),...C.parseDue(raw,zone,now),...extra};}
+  function baseItem(source,course,url,pageURL,title,raw,zone,now,extra={}){return {source,title:C.clean(title,250),course:course.title,courseId:course.id,term:course.term,url,linkVersion:2,pageURL:C.canonicalURL(pageURL),...C.parseDue(raw,zone,now),...extra};}
   function gradescope(doc,roots,url,zone,now,course){
     const items=[];
     for(const row of query(roots,'tr,[role="row"]')){
@@ -105,14 +105,15 @@
     for(const row of query(roots,'tr,[role="row"],d2l-list-item,.d2l-datalist-item')){
       if(hidden(row)||row.querySelector('tr,[role="row"]'))continue;
       const cell=cells(row),nameCell=cell[0]||row,headers=headersFor(row);
-      let anchor=[...nameCell.querySelectorAll('a[href]')].find(a=>/folders_submit_files|quizzing/i.test(a.getAttribute('href')));
+      let anchor=[...nameCell.querySelectorAll('a[href]')].find(a=>/folders?_submit_files|quizzing/i.test(a.getAttribute('href')));
       if(!anchor)anchor=[...nameCell.querySelectorAll('a,button,[data-assignment-name]')].find(a=>text(a)&&!/^(actions?|view|open|submit|start|continue|feedback|not submitted)$/i.test(text(a)));
       if(!anchor)continue;
       const title=anchor.getAttribute('data-assignment-name')||text(anchor),raw=labelDate(nameCell);
       // Calendar widget links are summaries of assignments, not new assignments.
       if(C.isEventAlias({source:'brightspace',title}))continue;
-      const nativeLink=C.canonicalURL(anchor.getAttribute('href'),url);
-      const positive=nativeLink&&/folders_submit_files|quizzing/i.test(nativeLink);
+      let nativeLink=C.canonicalURL(anchor.getAttribute('href'),url);
+      if(nativeLink&&course.id&&/folders?_submit_files|quizzing/i.test(nativeLink)){const target=new URL(nativeLink);if(!target.searchParams.has('ou'))target.searchParams.set('ou',course.id);nativeLink=target.href;}
+      const positive=nativeLink&&/folders?_submit_files|quizzing/i.test(nativeLink);
       if(!positive&&!raw&&!/not submitted/i.test(text(row)))continue;
       const link=nativeLink||C.canonicalURL(url);if(!link||C.sourceFor(link)!=='brightspace')continue;
       const dueIndex=headers.findIndex(h=>/due/i.test(h)&&!/end|late/i.test(h));
@@ -131,6 +132,7 @@
     for(const row of query(roots,'tr,[role="row"],[data-assignment-id]')){
       if(hidden(row)||row.querySelector('tr,[role="row"]'))continue;
       const cell=cells(row),headers=headersFor(row),dueIndex=headers.findIndex(h=>/due/i.test(h)&&!/available|start|late/i.test(h));
+      if(cell.length&&cell.every((el,i)=>text(el)===headers[i]))continue;
       if(dueIndex<0&&!row.hasAttribute('data-assignment-id'))continue;
       const nameIndex=headers.findIndex(h=>/assignment|homework|name/i.test(h)),nameCell=cell[nameIndex>=0?nameIndex:0]||row;
       const anchor=nameCell.querySelector('a,button,[data-assignment-name]');
@@ -173,6 +175,7 @@
     const roots=allRoots(doc),zone=settings.zone||'America/New_York',source=C.sourceFor(url),course=courseInfo(roots,doc,url);
     let kind=C.pageKind(url);
     const login=!!query(roots,'input[type="password"]')[0]||/\/(login|signin|auth)(?:\/|$)/i.test(new URL(url).pathname),links=new Map();
+    const pageError=/\/d2l\/error\//i.test(new URL(url).pathname)||query(roots,'h1,h2,[role="alert"]').some(el=>/^(?:internal server error|service unavailable|an unexpected error occurred)/i.test(text(el)));
     for(const el of query(roots,'a[href],d2l-course-card[href]')){
       if(hidden(el))continue;
       const href=C.canonicalURL(el.getAttribute('href'),url);if(!href||C.sourceFor(href)!==source||!C.pageKind(href))continue;
@@ -181,11 +184,21 @@
       links.set(href,{url:href,title:C.clean(text(el)||el.getAttribute('text')||'Course',160),source,courseId:id,term,inactive});
     }
     const adapters={gradescope,brightspace,pearson};
-    const raw=login||!(['course','list'].includes(kind)||C.canInspectPearson(url))?[]:adapters[source](doc,roots,url,zone,now,course);
+    const raw=login||pageError||!(['course','list'].includes(kind)||C.canInspectPearson(url))?[]:adapters[source](doc,roots,url,zone,now,course);
     if(!kind&&source==='pearson'&&raw.length)kind='list';
     const unique=new Map(raw.map(item=>[C.assignmentId(item),item]));
     const assignmentList=source==='pearson'&&query(roots,'tr,[role="row"]').some(row=>{const h=headersFor(row);return h.some(t=>/\bdue\b/i.test(t))&&h.some(t=>/assignment|homework/i.test(t));});
-    return {source,pageURL:C.canonicalURL(url),title:C.clean(doc.title,160),kind,login,course,assignmentList,embedded:source==='pearson'&&!!query(roots,'iframe')[0],items:[...unique.values()].slice(0,500),links:[...links.values()].slice(0,150),message:login?'Sign in to continue.':`${unique.size} assignments read.`};
+    let rowCount=0;
+    for(const table of query(roots,'table,[role="table"]')){
+      if(hidden(table))continue;
+      const first=table.querySelector('tr,[role="row"]'),headers=first?headersFor(first):[];
+      if(!headers.some(h=>/^(?:assignment(?: name)?|current quizzes|quiz(?: name)?|name|homework)$/i.test(h)))continue;
+      rowCount += [...table.querySelectorAll('tr,[role="row"]')].filter(row=>row!==first&&!hidden(row)&&row.querySelector('td,[role="cell"]')&&!row.closest('thead')&&!C.isEventAlias({source,title:text(row.querySelector('a'))})&&!/^(?:no assignments|no quizzes|no items)/i.test(text(row))).length;
+    }
+    const explicitEmpty=query(roots,'[role="status"],d2l-empty-state,.empty-state,.d2l-datalist-empty,td,p').some(el=>!hidden(el)&&/^(?:there are )?no (?:assignments|quizzes|homework|items)(?:\s+(?:to display|found|available|due|in this|for this|listed)[\s\S]*)?[.!]?$/i.test(text(el)));
+    const partial=query(roots,'a,button,[role="button"]').some(el=>!hidden(el)&&!el.disabled&&el.getAttribute('aria-disabled')!=='true'&&/^(?:next(?: page)?|load more|show more assignments)$/i.test(el.getAttribute('aria-label')||text(el)));
+    const quality={rowCount:Math.max(rowCount,unique.size),readCount:unique.size,unreadableRows:Math.max(0,rowCount-raw.length),explicitEmpty,partial,preview:source==='pearson'&&raw.length>0&&!assignmentList};
+    return {source,pageURL:C.canonicalURL(url),title:C.clean(doc.title,160),kind,login,pageError,course,quality,assignmentList,embedded:source==='pearson'&&!!query(roots,'iframe')[0],items:[...unique.values()].slice(0,500),links:[...links.values()].slice(0,150),message:login?'Sign in to continue.':`${unique.size} assignments read.`};
   }
   function openPearsonAssignments(doc,url){
     if(!C.allowedURL(url)||new URL(url).hostname!=='mylabmastering.pearson.com'||!C.courseId(url))return false;

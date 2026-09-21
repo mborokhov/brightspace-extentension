@@ -2,7 +2,7 @@
 
 A shareable Chrome/Edge extension for Purdue Brightspace, Gradescope, and MyLab Math. No API key, server, or build step. Each person uses their own school login and browser storage.
 
-**Version 0.2.1 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
+**Version 0.3.0 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
 
 ## Install or update
 
@@ -19,10 +19,10 @@ For an existing installation pointing at this folder, click **Reload** on its ex
 1. Sign into Brightspace and Gradescope normally.
 2. Visit your course lists. Brightspace: open **Assignments** and **Quizzes**. Gradescope: open each course assignment table. Allow several seconds to render; expand sections and visit additional pages yourself.
 3. In Due North, open **Courses**. Courses labelled with the current semester are included automatically. If a site does not show a semester, confirm that course here once. Older or inactive courses are excluded from collection, sync, charts, and export.
-4. Click **Sync** to revisit discovered current course/list pages. **Sync details** shows coverage and failures.
+4. Click **Sync** to revisit discovered current course/list pages. **Sync details** shows counts, unreadable rows/dates, sign-in failures, and partial coverage. Source buttons show the last successful sync; failures preserve that timestamp. Reads older than a day are marked stale.
 5. For MyLab Math, click **MyLab Math** and grant its optional site access. Open your course's **Homework and Tests** page, reload it, then confirm the course in **Courses** if needed. Embedded lists on supported Pearson hosts are included.
 
-A sync checks up to 60 pages in background tabs. In its own temporary MyLab portal tabs, it opens the same-course Assignments menu and waits for the list; your existing tabs are not navigated. It does not start assignments or quizzes. Sign-in tabs may stay open so you can sign in normally and retry. Pages/sections that are not loaded must be opened manually.
+A sync checks up to 60 pages. It reuses recently loaded matching tabs, skips successful reads from the last two minutes, and uses temporary background tabs when a fresh load is needed. **Sync details → Refresh all pages** bypasses that cache. In its own temporary MyLab portal tabs, it opens the same-course Assignments menu and waits for the list; your existing tabs are not navigated. It does not start assignments or quizzes. Sign-in tabs may stay open so you can sign in normally and retry. Pages/sections that are not loaded must be opened manually.
 
 Semester detection uses Spring (January–May), Summer (June–July), and Fall (August–December), in the configured course time zone. It checks course labels, not assignment due dates. Unlabelled courses are excluded until you select them. On upgrade from v0.1, existing records with no semester label require this confirmation; old records remain stored but hidden.
 
@@ -30,9 +30,10 @@ Semester detection uses Spring (January–May), Summer (June–July), and Fall (
 
 - **Overview:** a Monday–Sunday chart of incomplete assignments, week navigation, and a searchable assignment list. Click a bar to filter by day.
 - **Calendar:** month navigation and assignments on their due dates. Click an assignment to edit its deadline.
-- **Edit date:** sets a local deadline, optionally without a time. Later syncs preserve it. **Use source date** restores the latest source deadline. Edits affect the chart, calendar, reminders, and export; they never modify the school site.
+- **Edit date:** sets a local deadline, optionally without a time. Later syncs preserve it. If the source deadline changes after your edit, the row shows both dates. **Use source date** restores the latest source deadline. Edits affect the chart, calendar, reminders, and export; they never modify the school site.
 - **Completion:** checkboxes are local overrides. **Use source status** removes an override. On Brightspace quiz lists, any populated Evaluation Status cell means completed; attempts alone do not. “Not Submitted” assignments stay pending.
-- **Duplicate cleanup:** Brightspace calendar links such as “View Event - Written Homework 11 - Due” are excluded from new scans. Existing copies reconcile with the same-course assignment, preserving local deadline and completion choices. Ambiguous same-name assignments and distinct native assignment IDs stay separate.
+- **Duplicate cleanup:** Brightspace calendar links such as “View Event - Written Homework 11 - Due” are excluded from new scans. Native assignment IDs also reconcile renamed records. Existing copies reconcile with the same-course assignment, preserving local deadline and completion choices. Ambiguous same-name assignments and distinct native assignment IDs stay separate.
+- **Brightspace links:** group assignment links retain their group parameter. Older stored links open the course list until resynced. Regular clicks from Due North fall back to that list if the new assignment tab reaches a Brightspace 500/404 error. The course name also opens the list.
 - **Dates:** Gradescope uses the right-hand due date, excluding the release date and late cutoff. Brightspace uses the “Due on” line under the assignment/quiz name.
 - **Export .ics:** downloads a snapshot of all current-course incomplete assignments with readable dates. Google Calendar live sync is not implemented yet. Importing an .ics file does not create ongoing synchronization.
 

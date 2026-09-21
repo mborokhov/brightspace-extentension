@@ -11,11 +11,11 @@ function demoState(){
   const examples=[['HW3',0,0,'not-submitted'],['Lab Report 4',1,1,'not-submitted'],['Written Homework 11',0,2,'not-submitted'],['Section 3.4 Homework',2,0,'not-submitted'],['Quiz 2',0,-1,'submitted'],['Lab preparation',1,3,'not-submitted'],['Problem set 5',2,4,'not-submitted'],['Project proposal',1,null,'not-submitted']];
   examples.forEach(([title,index,offset,status],i)=>{const [source,courseId,course]=courses[index],courseKey=C.courseKey(source,courseId),date=offset===null?null:C.shiftDay(today,offset),dueAt=date?C.manualDue(date,'23:59',s.settings.zone).dueAt:null;const url=source==='gradescope'?`https://www.gradescope.com/courses/${courseId}/assignments/${i}`:s.courses[courseKey].url;s.items[`sample-${i}`]={id:`sample-${i}`,title,course,courseId,courseKey,term,source,status,url,dueAt,dueDate:null,dueRaw:dueAt||'',dateNote:'',lastSeen:Date.now()};});
   s.courses['brightspace:old']={key:'brightspace:old',source:'brightspace',id:'old',title:'Previous course',term:`Fall ${new Date().getFullYear()-1}`,enabled:false};
-  for(const source of Object.keys(sourceNames))s.sources[source]={lastSeen:Date.now()};return s;
+  for(const source of Object.keys(sourceNames))s.sources[source]={lastSuccess:Date.now(),outcome:'updated',message:'Sample data'};return s;
 }
 async function send(message){
   if(!extension){
-    if(message.type==='SET_ITEM'){const item=state.items[message.id];if(message.completionOverride!==undefined)item.completionOverride=message.completionOverride;if(message.resetDue)item.dueOverride=null;else if(message.date!==undefined)item.dueOverride=C.manualDue(message.date,message.time,state.settings.zone);}
+    if(message.type==='SET_ITEM'){const item=state.items[message.id];if(message.completionOverride!==undefined)item.completionOverride=message.completionOverride;if(message.resetDue)item.dueOverride=null;else if(message.date!==undefined){item.dueOverride=C.manualDue(message.date,message.time,state.settings.zone);item.overrideSourceDue={dueAt:item.dueAt,dueDate:item.dueDate};}}
     if(message.type==='SET_COURSE'){const c=state.courses[message.key];c.enabled=message.enabled;c.term=state.activeTerm;c.userSelected=message.enabled;}
     if(message.type==='SET_SETTINGS')state.settings=message.settings;
     if(message.type==='CLEAR'){state=C.emptyState();state.settings.collecting=false;}
@@ -30,6 +30,7 @@ function dayOf(item){return item.dueAt?C.dateKey(item.dueAt,state.settings.zone)
 function dayLabel(day,options={month:'short',day:'numeric'}){return new Intl.DateTimeFormat('en-US',{timeZone:'UTC',...options}).format(new Date(`${day}T12:00:00Z`));}
 function dateLabel(item){const day=dayOf(item);return day?dayLabel(day):'Set date';}
 function timeLabel(item){return item.dueAt?new Intl.DateTimeFormat('en-US',{timeZone:state.settings.zone,hour:'numeric',minute:'2-digit'}).format(new Date(item.dueAt)):item.dueDate?'All day':'';}
+function deadlineText(item){return dayOf(item)?`${dateLabel(item)} ${timeLabel(item)}`.trim():'No deadline';}
 function relative(ms){if(!ms)return 'Not synced';const min=Math.max(0,Math.round((Date.now()-ms)/60000));return min<1?'Just synced':min<60?`${min}m ago`:min<1440?`${Math.floor(min/60)}h ago`:`${Math.floor(min/1440)}d ago`;}
 function baseItems(){const search=$('search').value.toLowerCase().trim(),course=$('course-filter').value;return C.activeItems(state).filter(i=>(!course||i.courseKey===course)&&(!search||`${i.title} ${i.course} ${sourceNames[i.source]}`.toLowerCase().includes(search)));}
 function statusMatches(item){const filter=$('status-filter').value;return filter==='all'||(filter==='done'?C.isDone(item):!C.isDone(item));}
@@ -59,9 +60,12 @@ function renderList(items){
   for(const item of filtered){
     const done=C.isDone(item),past=!done&&item.dueAt&&Date.parse(item.dueAt)<now,row=el('tr',done?'completed':'');
     const checkCell=el('td'),check=el('input','completion');check.type='checkbox';check.checked=done;check.setAttribute('aria-label',`Mark ${item.title} ${done?'incomplete':'complete'}`);check.addEventListener('change',()=>act({type:'SET_ITEM',id:item.id,completionOverride:check.checked?'done':'todo'}));checkCell.append(check);row.append(checkCell);
-    const nameCell=el('td'),link=el(extension?'a':'span','assignment-link',item.title);if(extension){link.href=item.url;link.target='_blank';link.rel='noopener noreferrer';}nameCell.append(link);
-    if(item.changedAt&&now-item.changedAt<7*86400000)nameCell.append(el('span','item-detail',item.dueOverride?'Source changed · your date kept':'Source deadline changed'));row.append(nameCell);
-    const course=el('td');course.append(el('span','course-name',item.course),el('span','source-name',sourceNames[item.source]));row.append(course);
+    const nameCell=el('td'),link=el(extension?'a':'span','assignment-link',item.title);if(extension){link.href=C.assignmentOpenURL(item);link.target='_blank';link.rel='noopener noreferrer';link.addEventListener('click',event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();act({type:'OPEN_ASSIGNMENT',id:item.id});});}nameCell.append(link);
+    const original=state.items[item.id],sourceChanged=item.dueOverride&&(original.overrideSourceDue?!C.sameDeadline(original.overrideSourceDue,original):original.changedAt>(original.dueOverrideUpdatedAt||0));
+    if(sourceChanged)nameCell.append(el('span','item-detail deadline-change',`Source: ${deadlineText(original)} · Your date: ${deadlineText(item)}`));
+    else if(!item.dueOverride&&item.changedAt&&now-item.changedAt<7*86400000)nameCell.append(el('span','item-detail','Source deadline changed'));
+    row.append(nameCell);
+    const course=el('td');const courseName=el(item.source==='brightspace'&&extension?'a':'span','course-name',item.course);if(courseName.tagName==='A'){courseName.href=C.courseListURL(item);courseName.target='_blank';courseName.rel='noopener noreferrer';courseName.title='Open the course assignment list';}course.append(courseName,el('span','source-name',sourceNames[item.source]));row.append(course);
     const dateCell=el('td'),date=el('div',`deadline${past?' past':''}`,dateLabel(item));date.title=`${item.dueRaw||'No date provided'}${item.dueOverride?' · Custom deadline':''}`;date.append(el('small','',`${timeLabel(item)}${item.dueOverride?' · Edited':''}`));dateCell.append(date);row.append(dateCell);
     const statusCell=el('td');let status=done?['done','Completed']:past?['past','Past due']:item.dueAt&&Date.parse(item.dueAt)-now<2*86400000?['soon','Due soon']:['','To do'];statusCell.append(el('span',`pill ${status[0]}`,status[1]));if(item.completionOverride){const reset=el('button','reset-status','Use source status');reset.addEventListener('click',()=>act({type:'SET_ITEM',id:item.id,completionOverride:''}));statusCell.append(reset);}row.append(statusCell);
     const editCell=el('td'),edit=el('button','edit-button','Edit date');edit.setAttribute('aria-label',`Edit deadline for ${item.title}`);edit.addEventListener('click',()=>openEditor(item.id));editCell.append(edit);row.append(editCell);body.append(row);
@@ -76,8 +80,14 @@ function render(){
   $('page-title').textContent=view==='overview'?'Overview':'Calendar';$('week-panel').hidden=view!=='overview';$('calendar-panel').hidden=view!=='calendar';
   const select=$('course-filter'),selected=select.value,courses=Object.values(state.courses).filter(c=>C.isCourseActive(state,c.key)).sort((a,b)=>a.title.localeCompare(b.title));select.replaceChildren(new Option('All courses',''),...courses.map(c=>new Option(c.title,c.key)));select.value=courses.some(c=>c.key===selected)?selected:'';
   const job=state.job;$('sync').textContent=job?.running?'■ Stop':'↻ Sync';$('status').textContent=!state.settings.collecting?'Collection paused':job?.running?`${job.checked} pages checked…`:job?.note||'';
-  for(const source of Object.keys(sourceNames))$(source+'-source').title=state.sources[source]?.login?'Sign in required':relative(state.sources[source]?.lastSeen);
-  $('pearson-source').title=pearsonReady?relative(state.sources.pearson?.lastSeen):'Enable MyLab Math';
+  for(const source of Object.keys(sourceNames)){
+    const data=state.sources[source]||{},stamp=data.lastSuccess,age=stamp?Date.now()-stamp:0;
+    const issue=data.outcome==='login'?'Sign in':data.outcome==='partial'?'Partial':data.outcome==='unselected'?'Choose courses':['error','unreadable'].includes(data.outcome)?'Read failed':'';
+    $(source+'-freshness').textContent=`${stamp?`${age>86400000?'Stale · ':''}${relative(stamp)}`:data.lastPageSuccess?'List read '+relative(data.lastPageSuccess):'Not synced'}${issue?' · '+issue:''}`;
+    $(source+'-source').classList.toggle('source-warning',!!issue||age>86400000);
+    $(source+'-source').title=`${stamp?'Last successful sync: '+new Date(stamp).toLocaleString('en-US',{timeZone:state.settings.zone}):'No successful full check yet'}${data.message?' · '+data.message:''}`;
+  }
+  if(!pearsonReady)$('pearson-source').title='Enable MyLab Math';
   const items=baseItems();renderWeek(items);if(view==='calendar')renderCalendar(items);renderList(items);
   if($('courses-dialog').open)renderCourses();if($('coverage-dialog').open)renderCoverage();
 }
@@ -92,7 +102,7 @@ function openCourses(){renderCourses();$('courses-dialog').showModal();}
 function renderCoverage(){
   $('sync-errors').replaceChildren(...(state.job?.errors||[]).map(e=>el('p','sync-error',e)));
   const pages=Object.values(state.pages).filter(p=>p.kind==='home'||C.isCourseActive(state,p.courseKey));
-  $('coverage-pages').replaceChildren(...pages.map(p=>{const row=el('div','coverage-row'),a=el('a','',p.title||p.url);a.href=p.url;a.target='_blank';a.rel='noopener noreferrer';row.append(a,el('small','',`${relative(p.lastSeen)} · ${p.message||'Not checked'}`));return row;}));
+  $('coverage-pages').replaceChildren(...pages.map(p=>{const row=el('div','coverage-row'),a=el('a','',p.title||p.url);a.href=p.url;a.target='_blank';a.rel='noopener noreferrer';row.append(a,el('small','',`${p.lastSuccess?'Last successful read: '+relative(p.lastSuccess):'No successful read'} · ${p.message||'Not checked'}${p.quality?.rowCount?' · '+p.count+'/'+p.quality.rowCount+' rows read':''}`));return row;}));
   if(!pages.length)$('coverage-pages').append(el('p','muted','No selected course pages yet.'));
 }
 async function openSource(source){
@@ -112,6 +122,7 @@ $('sync').addEventListener('click',()=>act({type:state.job?.running?'STOP_SYNC':
 $('courses-open').addEventListener('click',openCourses);$('empty-courses').addEventListener('click',openCourses);$('courses-sync').addEventListener('click',()=>{$('courses-dialog').close();act({type:'SYNC'});});
 for(const source of Object.keys(sourceNames))$(source+'-source').addEventListener('click',()=>openSource(source));
 document.querySelectorAll('.close-dialog').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
+$('force-sync').addEventListener('click',()=>{$('coverage-dialog').close();act({type:'SYNC',force:true});});
 $('coverage-open').addEventListener('click',()=>{renderCoverage();$('coverage-dialog').showModal();});
 $('edit-form').addEventListener('submit',async event=>{event.preventDefault();try{await send({type:'SET_ITEM',id:editingId,date:$('edit-date').value,time:$('edit-time').value});$('edit-dialog').close();await refresh();toast('Deadline saved.');}catch(error){$('edit-error').textContent=error.message;}});
 $('reset-due').addEventListener('click',async()=>{try{await send({type:'SET_ITEM',id:editingId,resetDue:true});$('edit-dialog').close();await refresh();}catch(error){$('edit-error').textContent=error.message;}});
@@ -120,6 +131,6 @@ $('settings-form').addEventListener('submit',async event=>{event.preventDefault(
 $('zone-input').addEventListener('input',()=>$('zone-input').setCustomValidity(''));
 $('test-notification').addEventListener('click',()=>act({type:'TEST_NOTIFICATION'}));$('clear-data').addEventListener('click',()=>$('clear-dialog').showModal());$('confirm-clear').addEventListener('click',async()=>{try{await send({type:'CLEAR'});$('clear-dialog').close();$('settings-dialog').close();await refresh();}catch(error){toast(error.message);}});
 $('export').addEventListener('click',()=>{const items=C.activeItems(state);if(!items.some(i=>!C.isDone(i)&&(i.dueAt||i.dueDate))){toast('No dated assignments to export.');return;}const blob=new Blob([C.calendar(items)],{type:'text/calendar;charset=utf-8'}),url=URL.createObjectURL(blob),a=el('a');a.href=url;a.download=extension?'due-north.ics':'due-north-SAMPLE.ics';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Calendar snapshot exported.');});
-if(!extension){state=new URLSearchParams(location.search).has('empty')?C.emptyState():demoState();$('demo-banner').hidden=false;pearsonReady=true;}
+if(!extension){state=new URLSearchParams(location.search).has('empty')?C.emptyState():demoState();$('demo-banner').hidden=false;pearsonReady=true;if(new URLSearchParams(location.search).has('changes')){const item=state.items['sample-0'];item.dueOverride=C.manualDue(C.shiftDay(C.dateKey(Date.now(),state.settings.zone),2),'18:00',state.settings.zone);item.overrideSourceDue={dueAt:'2026-01-01T00:00:00Z',dueDate:null};item.changedAt=Date.now();state.sources.pearson={lastSuccess:Date.now()-3*86400000,outcome:'partial',message:'1 unreadable row'};}}
 if(extension)chrome.storage.onChanged.addListener((changes,area)=>{if(area==='local'&&changes.state){state=C.migrateState(changes.state.newValue);render();}});
 refresh();setInterval(render,60000);

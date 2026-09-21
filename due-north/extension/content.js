@@ -1,10 +1,10 @@
 (() => {
   'use strict';
-  let settings = {zone:'America/New_York'}, timer, lastSent = '', started = Date.now(), lastScan = 0, stopped = false, lastURL = location.href, syncOwned=false, openedAssignments=false;
+  let settings = {zone:'America/New_York'}, timer, lastSent = '', started = Date.now(), lastScan = 0, stopped = false, lastURL = location.href, syncOwned=false, openedAssignments=false, requestId='';
   async function scan() {
-    if (stopped) return;
+    if (stopped||settings.collecting===false) return;
     if (location.href !== lastURL) { lastURL = location.href; started = Date.now(); lastSent = ''; setTimeout(scan,6000); }
-    if (!DNCore.pageKind(location.href) && !DNCore.canInspectPearson?.(location.href) && !/\/(login|signin|auth)(?:\/|$)/i.test(location.pathname)) return;
+    if (!DNCore.pageKind(location.href) && !DNCore.canInspectPearson?.(location.href) && !/\/d2l\/error\//i.test(location.pathname) && !/\/(login|signin|auth)(?:\/|$)/i.test(location.pathname)) return;
     if (Date.now() - started < 5500) return;
     lastScan = Date.now();
     try {
@@ -13,6 +13,7 @@
         openedAssignments=true;
         if(DNExtract.openPearsonAssignments(document,location.href)){started=Date.now();lastSent='';setTimeout(scan,6000);return;}
       }
+      snapshot.requestId=requestId;
       snapshot.settled = Date.now() - started >= 5500;
       const signature = JSON.stringify(snapshot);
       if (signature === lastSent) return;
@@ -31,6 +32,10 @@
   // Custom element shadow roots can populate without mutating the outer document.
   setTimeout(scan,30000);
   chrome.runtime.onMessage.addListener((message,_sender,reply) => {
-    if (message.type === 'RESCAN') { lastSent = ''; scan().then(() => reply({ok:true})); return true; }
+    if (message.type === 'RESCAN') {
+      if(message.requireFresh&&(message.force||Date.now()-started>120000)){reply({readerVersion:3,needsReload:true});return;}
+      lastSent='';requestId=message.requestId||'';
+      chrome.runtime.sendMessage({type:'CONTENT_SETTINGS'}).then(response=>{if(response?.settings)settings=response.settings;return scan();}).then(()=>reply({ok:true,readerVersion:3}),()=>reply({readerVersion:3,needsReload:true}));return true;
+    }
   });
 })();

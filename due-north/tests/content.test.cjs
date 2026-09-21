@@ -1,15 +1,15 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 function harness(options={}){
- let time=100000,callback,extractions=0,sequence=0,opened=0;const timers=[],messages=[];
+ let listener;let time=100000,callback,extractions=0,sequence=0,opened=0;const timers=[],messages=[];
  const location={href:'https://www.gradescope.com/courses/42',pathname:'/courses/42'};
- const chrome={runtime:{sendMessage:async m=>{if(m.type==='CONTENT_SETTINGS')return {settings:{zone:'America/New_York'},syncOwned:!!options.syncOwned};messages.push(m);return {ok:true};},onMessage:{addListener:()=>{}}}};
+ const chrome={runtime:{sendMessage:async m=>{if(m.type==='CONTENT_SETTINGS')return {settings:{zone:'America/New_York'},syncOwned:!!options.syncOwned};messages.push(m);return {ok:true};},onMessage:{addListener:fn=>{listener=fn;}}}};
  const context=vm.createContext({chrome,document:{documentElement:{}},location,Date:class extends Date{static now(){return time;}},
    DNCore:{pageKind:()=> 'course'},DNExtract:{extract:()=>{extractions++;return {pageURL:location.href,source:options.pearson?'pearson':'gradescope',assignmentList:!!opened,items:[{title:'Item',revision:sequence}],links:[]};},openPearsonAssignments:()=>{opened++;return true;}},
    MutationObserver:class{constructor(fn){callback=fn;}observe(){}disconnect(){}},
    setTimeout:(fn,delay)=>{const token={fn,at:time+delay};timers.push(token);return token;},clearTimeout:token=>{const index=timers.indexOf(token);if(index>=0)timers.splice(index,1);}});
  vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension/content.js'),'utf8'),context);
  const tick=async ms=>{await Promise.resolve();const until=time+ms;while(true){timers.sort((a,b)=>a.at-b.at);if(!timers.length||timers[0].at>until)break;const next=timers.shift();time=next.at;next.fn();await Promise.resolve();await Promise.resolve();}time=until;await Promise.resolve();};
- return {tick,messages,location,opened:()=>opened,mutate:()=>{sequence++;callback();},count:()=>extractions};
+ return {rescan:message=>new Promise(resolve=>listener({type:"RESCAN",...message},{},resolve)),tick,messages,location,opened:()=>opened,mutate:()=>{sequence++;callback();},count:()=>extractions};
 }
 test('content collection waits for initial and SPA navigation rendering before capturing',async()=>{
  const h=harness();await h.tick(5000);assert.equal(h.messages.length,0);await h.tick(1000);assert.equal(h.messages.length,1);
@@ -26,4 +26,11 @@ test('only sync-owned Pearson tabs open Assignments, then wait for the list to r
  const user=harness({pearson:true});await user.tick(12000);assert.equal(user.opened(),0);assert.ok(user.messages.length>0);
  const sync=harness({pearson:true,syncOwned:true});await sync.tick(6000);assert.equal(sync.opened(),1);assert.equal(sync.messages.length,0);
  await sync.tick(6000);assert.equal(sync.opened(),1);assert.equal(sync.messages.length,1);assert.equal(sync.messages[0].snapshot.assignmentList,true);
+});
+
+test('fresh open pages tag requested scans; stale and forced scans request a background refresh',async()=>{
+ const h=harness();await h.tick(6000);
+ const fresh=await h.rescan({requireFresh:true,requestId:'run-1'});assert.equal(fresh.readerVersion,3);assert.equal(h.messages.at(-1).snapshot.requestId,'run-1');
+ assert.equal((await h.rescan({requireFresh:true,force:true})).needsReload,true);
+ await h.tick(121000);const before=h.messages.length;assert.equal((await h.rescan({requireFresh:true})).needsReload,true);assert.equal(h.messages.length,before);
 });

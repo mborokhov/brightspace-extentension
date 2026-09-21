@@ -114,3 +114,28 @@ test('event-only names are cleaned without discarding assignments; later edits w
  const single=C.deduplicateItems({e:event});assert.equal(single.e.title,'Written Homework 11');
  const actual=bsItem({id:'a',completionOverride:'todo',completionUpdatedAt:30});assert.equal(C.deduplicateItems({e:single.e,a:actual}).a.completionOverride,'todo');
 });
+
+
+test('Brightspace links preserve group context; legacy and mismatched links use the course list',()=>{
+ const direct=bsItem({linkVersion:2,url:'https://purdue.brightspace.com/d2l/lms/dropbox/user/folder_submit_files.d2l?ou=42&db=11&grpid=7&token=secret'});
+ assert.equal(new URL(C.assignmentOpenURL(direct)).searchParams.get('grpid'),'7');
+ assert.ok(!C.assignmentOpenURL(direct).includes('secret'));
+ assert.equal(C.assignmentOpenURL({...direct,linkVersion:0}),C.courseListURL(direct));
+ assert.equal(C.assignmentOpenURL({...direct,courseId:'43'}),C.courseListURL({...direct,courseId:'43'}));
+ assert.match(C.calendar([{...direct,id:'group'}],now),/grpid=7/);
+});
+test('native identity survives renames and preserves custom date baseline and source changes',()=>{
+ const old=bsItem({id:'historical',lastSeen:now,dueOverride:{dueAt:null,dueDate:'2026-09-25'},dueOverrideUpdatedAt:now,overrideSourceDue:{dueAt:item().dueAt,dueDate:null}});
+ const renamed=bsItem({id:'new',title:'Revised homework',lastSeen:now+1000,dueAt:'2026-09-21T03:59:00.000Z',dueRaw:'Sep 20, 2026 11:59 PM'});
+ const result=C.deduplicateItems({historical:old,new:renamed});
+ assert.deepEqual(Object.keys(result),['historical']);assert.equal(result.historical.title,'Revised homework');
+ assert.deepEqual(result.historical.overrideSourceDue,old.overrideSourceDue);assert.deepEqual(result.historical.dueOverride,old.dueOverride);
+ assert.equal(result.historical.deadlineChange.after.dueAt,renamed.dueAt);
+ assert.deepEqual(C.deduplicateItems(result),result);
+});
+
+test('duplicate reconciliation respects a newer reset and a removed source deadline',()=>{
+ const a=bsItem({id:'a',lastSeen:now,dueOverride:{dueAt:null,dueDate:'2026-09-25'},dueOverrideUpdatedAt:now});
+ const b=bsItem({id:'b',lastSeen:now+1000,dueAt:null,dueDate:null,dueRaw:'',dueOverride:null,dueOverrideUpdatedAt:now+1000});
+ const merged=C.deduplicateItems({a,b}).a;assert.equal(merged.dueOverride,null);assert.equal(merged.dueAt,null);assert.equal(merged.dueRaw,'');
+});

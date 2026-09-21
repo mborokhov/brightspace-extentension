@@ -2,3 +2,5 @@
 
 /* Align bar heights exactly with the chart scale. */
 .bar-track{position:relative;flex-shrink:0}.bar-fill{position:absolute;bottom:0}.bar-count{position:absolute;padding-bottom:0}#chart-axis{height:160px}.week-chart{background-image:repeating-linear-gradient(to top,transparent 0,transparent calc(25% - 1px),#eff2f5 calc(25% - 1px),#eff2f5 25%)}@media(min-width:1500px){#chart-axis{height:186px}}
+
+.source-bar>button>span{text-align:left}.source-bar small{display:block;font-size:9px;color:#7c8995;margin-top:4px}.source-bar>.source-warning{border-color:#d7ba89}.source-warning small{color:#97703a}.deadline-change{display:block;max-width:350px;font-size:10px;color:#956926;line-height:1.6;margin-top:6px}a.course-name:hover{text-decoration:underline}

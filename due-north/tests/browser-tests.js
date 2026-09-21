@@ -104,6 +104,23 @@ test('MyLab sync navigation selects only the same-course Assignments menu',()=>{
  const unsafe=doc('<form><button>Assignments</button></form><a href="https://evil.test/">Assignments</a><a href="/courses/999/menu/assignments">Assignments</a>');
  equal(DNExtract.openPearsonAssignments(unsafe,url),false);
 });
+test('Brightspace singular group links retain group context and add a missing course',()=>{
+ const s=extract('<table><tr><td><a href="/d2l/lms/dropbox/user/folder_submit_files.d2l?db=11&grpid=7">Group work</a><div>Due on Sep 19, 2026 11:59 PM</div></td><td>Not Submitted</td></tr></table>',bs);
+ equal(s.items.length,1);equal(s.items[0].linkVersion,2);equal(new URL(s.items[0].url).searchParams.get('grpid'),'7');equal(new URL(s.items[0].url).searchParams.get('ou'),'42');
+});
+test('Read diagnostics separate explicit empty, unreadable rows and partial lists',()=>{
+ equal(extract('<p>No assignments to display.</p>',gs).quality.explicitEmpty,true);
+ equal(extract('<h1>Assignments</h1>',gs).quality.explicitEmpty,false);
+ const s=extract('<table><tr><th>Name</th><th>Due</th></tr><tr><td><a href="/courses/42/assignments/1">Project</a></td><td>Sep 20, 2026</td></tr><tr><td></td><td>Sep 21, 2026</td></tr></table><button>Next page</button>',gs);
+ equal(s.quality.rowCount,2);equal(s.quality.unreadableRows,1);equal(s.quality.partial,true);
+});
+test('MyLab td headers are excluded from assignment row counts',()=>{
+ const s=extract('<table><tr><td>Due</td><td>Assignment</td></tr><tr><td>09/19/26 11:59pm</td><td>Homework 11</td></tr></table>','https://www.mathxl.com/Student/DoAssignments.aspx?courseId=123');
+ equal(s.items.length,1);equal(s.quality.rowCount,1);equal(s.quality.unreadableRows,0);equal(s.quality.preview,false);
+});
+test('Brightspace server error pages never count as empty assignment lists',()=>{
+ const s=extract('<h1>Internal Server Error</h1>','https://purdue.brightspace.com/d2l/error/500');equal(s.pageError,true);equal(s.quality.explicitEmpty,false);equal(s.items.length,0);
+});
 const passed=results.filter(r=>r.pass).length;
 document.getElementById('test-summary').textContent=`${passed}/${results.length} passed${passed===results.length?' — all parser checks passed.':' — failures need attention.'}`;
 document.title=`${passed===results.length?'PASS':'FAIL'} · Due North DOM tests`;

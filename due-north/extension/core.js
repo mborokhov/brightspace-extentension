@@ -14,7 +14,7 @@
       const u = new URL(value, base);
       if (!allowedURL(u.href)) return '';
       u.hash = '';
-      for (const key of [...u.searchParams.keys()]) if (!['ou', 'db', 'qi', 'isprv', 'cfql', 'contentid', 'courseid', 'course', 'homeworkid', 'assignmentid', 'testid'].includes(key.toLowerCase())) u.searchParams.delete(key);
+      for (const key of [...u.searchParams.keys()]) if (!['ou', 'db', 'grpid', 'qi', 'isprv', 'cfql', 'contentid', 'courseid', 'course', 'homeworkid', 'assignmentid', 'testid'].includes(key.toLowerCase())) u.searchParams.delete(key);
       u.searchParams.sort();
       return u.href;
     } catch { return ''; }
@@ -68,6 +68,37 @@
     return `${item.source}:${course}:${type}:${id || hash(assignmentTitle(item).toLowerCase())}`;
   }
   function validZone(zone) { try { new Intl.DateTimeFormat('en', {timeZone: zone}).format(); return true; } catch { return false; } }
+  function courseListURL(item) {
+    const id=clean(item.courseId||courseId(item.pageURL||item.url),80);
+    if(!/^\d+$/.test(id))return HOMES[0];
+    const quiz=item.type==='quiz'||/quizz/i.test(item.url||'')||/quizz/i.test(item.pageURL||'');
+    return `https://purdue.brightspace.com/d2l/lms/${quiz?'quizzing/user/quizzes_list':'dropbox/user/folders_list'}.d2l?ou=${id}`;
+  }
+  function assignmentOpenURL(item) {
+    const url=canonicalURL(item.url);
+    if(item.source!=='brightspace')return url||canonicalURL(item.pageURL);
+    if(item.linkVersion>=2&&url){
+      const u=new URL(url);
+      if(/\/(?:folders?_submit_files|quiz_summary)\.d2l$/i.test(u.pathname)&&u.searchParams.get('ou')===String(item.courseId)&&/^\d+$/.test(u.searchParams.get(/quizz/i.test(u.pathname)?'qi':'db')||''))return url;
+    }
+    return courseListURL(item);
+  }
+  const sameDeadline=(a,b)=>(a?.dueAt||null)===(b?.dueAt||null)&&(a?.dueDate||null)===(b?.dueDate||null);
+  function captureOutcome(snap,included) {
+    if(snap.login)return {code:'login',message:'Sign-in required',success:false};
+    if(snap.pageError)return {code:'error',message:'Site error — open the course and retry',success:false};
+    if(snap.course?.id&&!included)return {code:'unselected',message:'Select this semester’s course',success:false};
+    const count=snap.items.length,q=snap.quality||{};
+    if(count){
+      const missing=snap.items.filter(i=>i.dueRaw&&!i.dueAt&&!i.dueDate&&!/^(none|no due date|n\/a|[-—])$/i.test(i.dueRaw)).length;
+      if(q.partial||q.unreadableRows||missing||q.preview)return {code:'partial',message:`${count} assignments read${missing?` · ${missing} unreadable dates`:''}${q.unreadableRows?` · ${q.unreadableRows} unreadable rows`:''}${q.preview?' · Course Home preview only':''}${q.partial?' · more pages or sections may remain':''}`,success:false};
+      return {code:'updated',message:`${count} assignments checked`,success:true};
+    }
+    if(q.partial||q.unreadableRows)return {code:'partial',message:'Could not read all assignment rows or pages',success:false};
+    if(q.explicitEmpty)return {code:'empty',message:'No assignments listed',success:true};
+    if(snap.kind==='home'||snap.kind==='course'&&snap.links?.some(link=>pageKind(link.url)==='list'))return {code:'discovered',message:'Course links checked',success:true};
+    return {code:'unreadable',message:'Could not read assignments on this page',success:false};
+  }
   function zoneParts(ms, zone) {
     return Object.fromEntries(new Intl.DateTimeFormat('en-US', {timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23'}).formatToParts(ms).filter(p => p.type !== 'literal').map(p => [p.type, Number(p.value)]));
   }
@@ -169,23 +200,39 @@
   function combineDuplicates(keeper,alias) {
     const merged={...keeper,firstSeen:Math.min(keeper.firstSeen||Infinity,alias.firstSeen||Infinity),lastSeen:Math.max(keeper.lastSeen||0,alias.lastSeen||0)};
     if(!alias.eventAlias&&(alias.lastSeen||0)>(keeper.lastSeen||0)){
-      if(alias.dueRaw)for(const field of ['dueAt','dueDate','dueRaw','dateNote'])merged[field]=alias[field];
+      const sameNative=nativeAssignmentId(keeper)&&assignmentId(keeper)===assignmentId(alias);
+      if(sameNative)for(const field of ['title','url','pageURL','linkVersion','course','term'])if(alias[field]!==undefined)merged[field]=alias[field];
+      if(alias.dueRaw||sameNative){
+        if(!sameDeadline(keeper,alias)){merged.previousDue=keeper.dueAt||keeper.dueDate||'';merged.changedAt=alias.lastSeen;merged.deadlineChange={before:{dueAt:keeper.dueAt,dueDate:keeper.dueDate},after:{dueAt:alias.dueAt,dueDate:alias.dueDate},at:alias.lastSeen};}
+        for(const field of ['dueAt','dueDate','dueRaw','dateNote'])merged[field]=alias[field];
+      }
       if(alias.status&&alias.status!=='unknown')merged.status=alias.status;
     }
     for(const [field,stamp] of [['dueOverride','dueOverrideUpdatedAt'],['completionOverride','completionUpdatedAt']]){
-      if((alias[stamp]||0)>(keeper[stamp]||0)||(!keeper[field]&&!keeper[stamp])){merged[field]=alias[field]??keeper[field];merged[stamp]=alias[stamp]||keeper[stamp];}
+      if((alias[stamp]||0)>(keeper[stamp]||0)||(!keeper[field]&&!keeper[stamp])){merged[field]=alias[field]!==undefined?alias[field]:keeper[field];merged[stamp]=alias[stamp]||keeper[stamp];if(field==='dueOverride')merged.overrideSourceDue=alias.overrideSourceDue||keeper.overrideSourceDue;}
     }
     merged.remindedFor=keeper.remindedFor||alias.remindedFor;
+    if(!Number.isFinite(merged.firstSeen))delete merged.firstSeen;
     return merged;
   }
   function deduplicateItems(items) {
     const next={},groups=new Map();
+    const nativeKeys=new Map();
     for(const [key,original] of Object.entries(items)){
       const item={...original,eventAlias:isEventAlias(original),title:assignmentTitle(original)};
       next[key]=item;
+      if(nativeAssignmentId(item)){
+        const identity=assignmentId(item),prior=nativeKeys.get(identity);
+        if(prior){
+          next[prior]=combineDuplicates(next[prior],item);delete next[key];continue;
+        }
+        nativeKeys.set(identity,key);
+      }
+    }
+    for(const [key,item] of Object.entries(next)){
       const course=item.courseId||courseId(item.pageURL||item.url);
       if(!course)continue;
-      const group=JSON.stringify([item.source,course,item.title.toLowerCase()]);
+      const group=JSON.stringify([item.source,course,item.title.normalize('NFKC').toLowerCase()]);
       if(!groups.has(group))groups.set(group,[]);groups.get(group).push(key);
     }
     for(const keys of groups.values()){
@@ -207,7 +254,8 @@
     for (const item of incoming) {
       if (!allowedURL(item.url) || !clean(item.title) || !['brightspace','gradescope','pearson'].includes(item.source)) continue;
       const id = assignmentId(item), old = next[id];
-      next[id] = {...item, id, firstSeen: old?.firstSeen || now, lastSeen: now, completionOverride: old?.completionOverride || '', dueOverride: old?.dueOverride || null, dueOverrideUpdatedAt:old?.dueOverrideUpdatedAt,completionUpdatedAt:old?.completionUpdatedAt,remindedFor:old?.remindedFor,
+      next[id] = {...item, id, firstSeen: old?.firstSeen || now, lastSeen: now, completionOverride: old?.completionOverride || '', dueOverride: old?.dueOverride || null, dueOverrideUpdatedAt:old?.dueOverrideUpdatedAt,overrideSourceDue:old?.overrideSourceDue,completionUpdatedAt:old?.completionUpdatedAt,remindedFor:old?.remindedFor,
+        deadlineChange:old&&!sameDeadline(old,item)?{before:{dueAt:old.dueAt,dueDate:old.dueDate},after:{dueAt:item.dueAt,dueDate:item.dueDate},at:now}:old?.deadlineChange,
         previousDue: old && (old.dueAt !== item.dueAt || old.dueDate !== item.dueDate) ? old.dueAt || old.dueDate || '' : old?.previousDue || '',
         changedAt: old && (old.dueAt !== item.dueAt || old.dueDate !== item.dueDate) ? now : old?.changedAt || null};
     }
@@ -230,11 +278,11 @@
       lines.push('BEGIN:VEVENT', `UID:${item.id}@due-north.local`, `DTSTAMP:${stamp}`);
       if (item.dueAt) lines.push(`DTSTART:${item.dueAt.replace(/[-:]/g,'').replace(/\.\d{3}/,'')}`);
       else lines.push(`DTSTART;VALUE=DATE:${item.dueDate.replace(/-/g,'')}`);
-      lines.push(`SUMMARY:${escapeICS(`${item.course}: ${item.title}`)}`, `DESCRIPTION:${escapeICS(`Deadline snapshot from ${item.source}. ${item.dateNote || ''}\n${item.dueRaw}\nCheck the source for updates.\n${item.url}`)}`, `URL:${item.url}`, 'END:VEVENT');
+      lines.push(`SUMMARY:${escapeICS(`${item.course}: ${item.title}`)}`, `DESCRIPTION:${escapeICS(`Deadline snapshot from ${item.source}. ${item.dateNote || ''}\n${item.dueRaw}\nCheck the source for updates.\n${assignmentOpenURL(item)}`)}`, `URL:${assignmentOpenURL(item)}`, 'END:VEVENT');
     }
     lines.push('END:VCALENDAR'); return lines.map(foldICS).join('\r\n') + '\r\n';
   }
-  const api = {HOSTS,PEARSON_HOSTS,HOMES,clean,allowedURL,canonicalURL,sourceFor,pageKind,canInspectPearson,courseId,hash,assignmentId,assignmentTitle,isEventAlias,deduplicateItems,validZone,parseDue,zonedISO,emptyState,isDone,mergeItems,dueReminders,calendar,parseTerm,currentTerm,courseKey,migrateState,isCourseActive,effective,activeItems,manualDue,dateKey,shiftDay,weekStart,weekCounts};
+  const api = {HOSTS,PEARSON_HOSTS,HOMES,clean,allowedURL,canonicalURL,sourceFor,pageKind,canInspectPearson,courseId,hash,assignmentId,assignmentTitle,assignmentOpenURL,courseListURL,sameDeadline,captureOutcome,isEventAlias,deduplicateItems,validZone,parseDue,zonedISO,emptyState,isDone,mergeItems,dueReminders,calendar,parseTerm,currentTerm,courseKey,migrateState,isCourseActive,effective,activeItems,manualDue,dateKey,shiftDay,weekStart,weekCounts};
   root.DNCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);
