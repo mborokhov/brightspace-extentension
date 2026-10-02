@@ -1,6 +1,6 @@
 # Due North privacy information
 
-Version 0.3.0. Local browser storage only; no developer server, analytics, advertising, remote code, or cloud-synced storage.
+Version 0.4.0. Local browser storage only; no developer server, analytics, advertising, remote code, or cloud-synced storage.
 
 ## Stored information
 
@@ -14,7 +14,7 @@ Required hosts: `purdue.brightspace.com`, `www.gradescope.com`, and `gradescope.
 
 Optional MyLab Math hosts, enabled through the MyLab Math button: `mylabmastering.pearson.com`, `www.mathxl.com`, `mylab.pearson.com`, and `xlitemprod.pearsoncmg.com`. The reader can run inside embedded frames on these hosts. Unsupported player/submission pages are skipped.
 
-Readers inspect visible course/list information available to your signed-in session. Course metadata is discovered to determine the semester. Assignments from unselected or older courses are not saved. Sync reuses suitable open pages without navigating them or opens only home pages and selected current course/list pages, up to 60 pages per run. Temporary MyLab sync tabs can open the same-course Assignments menu; existing user tabs are not navigated. Temporary background tabs are closed after collection; active tabs, user tabs, and sign-in pages are preserved. Assignment tabs opened by a regular Due North click can redirect to the course list if Brightspace reports a 500/404 error. Your browser and the school sites handle normal network traffic and authentication.
+Readers inspect course/list information available to your signed-in session, either from downloaded HTML or rendered pages. Downloaded HTML is parsed transiently in a detached document; the full HTML is never saved or uploaded. Remote scripts are not executed by the hidden parser, and its content policy blocks remote subresources. Background requests use browser-managed session credentials without reading cookie values. Course metadata is discovered to determine the semester. Assignments from unselected or older courses are not saved. Sync downloads only supported home pages and selected current course/list pages, up to 60 pages per run. Fetch redirects are not followed; pages requiring navigation fall back to rendered collection. Sync reuses suitable open pages without navigating them, or opens at most one reusable inactive tab per run. Temporary MyLab sync tabs can open the same-course Assignments menu; existing user tabs are not navigated. The temporary tab is closed after the run; active tabs, user tabs, and sign-in pages are preserved. An expired session skips the remaining pages on that platform until the next sync attempt. Assignment tabs opened by a regular Due North click can redirect to the course list if Brightspace reports a 500/404 error. Your browser and the school sites handle normal network traffic and authentication.
 
 ## Permissions
 
@@ -22,6 +22,7 @@ Readers inspect visible course/list information available to your signed-in sess
 - `storage`: save local records and preferences.
 - `alarms`: check deadlines and stalled syncs.
 - `notifications`: optional desktop reminders; assignment titles can appear in OS notifications.
+- `offscreen`: parse downloaded HTML in a hidden extension document without opening tabs.
 - `scripting`: register the optional Pearson reader after you grant its host access.
 
 No all-sites, passwords, cookies, clipboard, geolocation, camera, microphone, browsing-history, or broad tabs permission is requested.

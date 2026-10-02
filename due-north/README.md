@@ -2,7 +2,7 @@
 
 A shareable Chrome/Edge extension for Purdue Brightspace, Gradescope, and MyLab Math. No API key, server, or build step. Each person uses their own school login and browser storage.
 
-**Version 0.3.0 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
+**Version 0.4.0 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
 
 ## Install or update
 
@@ -22,7 +22,11 @@ For an existing installation pointing at this folder, click **Reload** on its ex
 4. Click **Sync** to revisit discovered current course/list pages. **Sync details** shows counts, unreadable rows/dates, sign-in failures, and partial coverage. Source buttons show the last successful sync; failures preserve that timestamp. Reads older than a day are marked stale.
 5. For MyLab Math, click **MyLab Math** and grant its optional site access. Open your course's **Homework and Tests** page, reload it, then confirm the course in **Courses** if needed. Embedded lists on supported Pearson hosts are included.
 
-A sync checks up to 60 pages. It reuses recently loaded matching tabs, skips successful reads from the last two minutes, and uses temporary background tabs when a fresh load is needed. **Sync details → Refresh all pages** bypasses that cache. In its own temporary MyLab portal tabs, it opens the same-course Assignments menu and waits for the list; your existing tabs are not navigated. It does not start assignments or quizzes. Sign-in tabs may stay open so you can sign in normally and retry. Pages/sections that are not loaded must be opened manually.
+A sync checks up to 60 pages. It first downloads supported list pages in the background using your existing session and parses them in a hidden extension document. Pages that need JavaScript fall back to reading an existing matching tab, then to **one reusable inactive tab per run**. Your existing tabs are never reloaded or navigated. If you activate, navigate away from, or close the temporary tab, the extension leaves it alone and reports any remaining pages it cannot read.
+
+Successful reads from the last two minutes are skipped. **Sync details → Refresh all pages** bypasses that cache and requests fresh loads. Sign-in failures skip the rest of that platform for the current run and show which site needs sign-in; other platforms can still complete background reads. A sign-in tab may be left open, but no replacement temporary tabs are created in that run. Sign in normally and click Sync again.
+
+In its own temporary MyLab tab, sync can open the same-course Assignments menu and wait for the embedded list. It never starts assignments or quizzes. Stop, pausing collection, and Clear cancel pending background reads. Unsupported responses fall back to rendering; HTTP errors are reported without opening tabs. Pages/sections that are not loaded must still be opened manually. Whether a particular school page supports background reading depends on its authentication and rendering behavior; live account verification is still needed.
 
 Semester detection uses Spring (January–May), Summer (June–July), and Fall (August–December), in the configured course time zone. It checks course labels, not assignment due dates. Unlabelled courses are excluded until you select them. On upgrade from v0.1, existing records with no semester label require this confirmation; old records remain stored but hidden.
 

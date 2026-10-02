@@ -5,7 +5,7 @@ const base = path.resolve(__dirname,'..','extension');
 const manifest = JSON.parse(fs.readFileSync(path.join(base,'manifest.json'),'utf8'));
 for (const filename of fs.readdirSync(base).filter(f=>f.endsWith('.js'))) cp.execFileSync(process.execPath,['--check',path.join(base,filename)],{stdio:'inherit'});
 const refs = [manifest.background.service_worker,...Object.values(manifest.icons),...manifest.content_scripts.flatMap(c=>c.js)];
-for (const html of ['dashboard.html','help.html']) {
+for (const html of ['dashboard.html','help.html','offscreen.html']) {
   const data=fs.readFileSync(path.join(base,html),'utf8');
   for(const match of data.matchAll(/(?:src|href)="([^"#]+)"/g)) if(!match[1].includes('://')) refs.push(match[1]);
   if(/<script(?![^>]*\bsrc=)[^>]*>/i.test(data)) throw new Error('Inline script violates CSP');

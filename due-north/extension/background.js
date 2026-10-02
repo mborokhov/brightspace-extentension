@@ -1,5 +1,5 @@
 'use strict';
-importScripts('core.js');
+importScripts('core.js','background-fetch.js');
 const C=DNCore,PEARSON_ORIGINS=C.PEARSON_HOSTS.map(host=>`https://${host}/*`),PEARSON_HOME='https://mylabmastering.pearson.com/courses';
 let serial=Promise.resolve();
 const locked=fn=>{const result=serial.then(fn);serial=result.catch(()=>{});return result;};
@@ -41,21 +41,34 @@ function canSync(state,url){
 const CACHE_MS=2*60000;
 const goodCodes=new Set(['updated','unchanged','empty','discovered']);
 function sourceStatus(state,source){return state.sources[source] ||= {};}
-async function closeOwned(id,expectedURL){
-  if(!id)return;
-  try{
-    const tab=await chrome.tabs.get(id),actual=C.canonicalURL(tab.url),expected=C.canonicalURL(expectedURL);
-    if(tab.active||!actual||!expected)return;
-    const sameCourse=C.pageKind(actual)&&C.sourceFor(actual)===C.sourceFor(expected)&&C.courseId(actual)&&C.courseId(actual)===C.courseId(expected);
-    const errorPage=new URL(actual).hostname===new URL(expected).hostname&&/\/d2l\/error\//i.test(new URL(actual).pathname);
-    if((actual===expected&&C.pageKind(actual))||sameCourse||errorPage||actual===expected&&C.canInspectPearson(actual))await chrome.tabs.remove(id);
-  }catch{}
+const requests=new Map();
+function cancelRequest(job){const request=requests.get(job?.runId);request?.abort();requests.delete(job?.runId);}
+function ownsLocation(tab,expectedURL){
+  const actual=C.canonicalURL(tab.url),expected=C.canonicalURL(expectedURL);
+  if(tab.active||!actual||!expected)return false;
+  return actual===expected||C.sourceFor(actual)===C.sourceFor(expected)&&(
+    C.sourceFor(actual)==='pearson'&&C.pageKind(actual)&&C.courseId(actual)&&C.courseId(actual)===C.courseId(expected)||
+    /\/d2l\/error\//i.test(new URL(actual).pathname));
 }
-async function releaseCurrent(state,preserve=false){
-  const job=state.job,id=job?.tabId,owned=job?.tabOwned!==false,url=job?.currentURL;
-  if(!id)return;
-  job.tabId=null;state.syncTabs ||= {};delete state.syncTabs[id];await save(state);
-  if(owned&&!preserve)await closeOwned(id,url);
+async function releaseCurrent(state,preserve=false,keepRenderer=false){
+  const job=state.job;if(!job)return;
+  const id=job.tabId;
+  if(id&&job.tabOwned!==false&&!job.renderTabId){job.renderTabId=id;job.renderURL=job.currentURL;job.rendererCreated=true;}
+  job.tabId=null;job.transport=null;
+  state.syncTabs ||= {};
+  if(preserve&&job.renderTabId===id){delete state.syncTabs[id];job.renderTabId=null;job.rendererUnavailable=true;}
+  if(keepRenderer){await save(state);return;}
+  cancelRequest(job);
+  const owned=job.renderTabId,expected=job.renderURL;job.renderTabId=null;
+  if(owned)delete state.syncTabs[owned];await save(state);
+  if(owned)try{const tab=await chrome.tabs.get(owned);if(ownsLocation(tab,expected))await chrome.tabs.remove(owned);}catch{}
+}
+function blockSource(state,source,message='Sign in to '+({brightspace:'Brightspace',gradescope:'Gradescope',pearson:'MyLab Math'}[source])+', then sync again.'){
+  const job=state.job;job.blockedSources ||= {};job.blockedSources[source]=true;
+  job.queue=job.queue.filter(url=>C.sourceFor(url)!==source);
+  Object.assign(sourceStatus(state,source),{login:true,outcome:'login',message,lastAttempt:Date.now()});
+  if(state.pages[job.currentURL])Object.assign(state.pages[job.currentURL],{outcome:'login',message,lastAttempt:Date.now()});
+  recordResult(state,job.currentURL,{code:'login',message,success:false});
 }
 function recordResult(state,url,outcome,count=0){
   const job=state.job,source=C.sourceFor(url);
@@ -67,7 +80,7 @@ function recordResult(state,url,outcome,count=0){
 function finishJob(state){
   const job=state.job;job.running=false;job.finishedAt=Date.now();
   const results=Object.values(job.results||{}),ids=Object.keys(job.itemIds||{}).filter(id=>state.items[id]);
-  job.note=`${ids.length} assignments checked · ${job.changed||0} changed${job.reused?` · ${job.reused} open pages reused`:''}${job.skipped?` · ${job.skipped} recent pages skipped`:''}${results.some(r=>!r.success)?' · needs attention':''}`;
+  job.note=`${ids.length} assignments checked · ${job.changed||0} changed${job.background?` · ${job.background} background reads`:''}${job.reused?` · ${job.reused} open pages reused`:''}${job.skipped?` · ${job.skipped} recent pages skipped`:''}${results.some(r=>!r.success)?' · needs attention':''}`;
   for(const source of new Set([...(job.sources||[]),...results.map(r=>r.source)])){
     const data=sourceStatus(state,source),checks=results.filter(r=>r.source===source),courses=Object.values(state.courses).filter(c=>c.source===source&&C.isCourseActive(state,c.key));
     const covered=courses.every(c=>Object.values(state.pages).some(p=>p.courseKey===c.key&&['updated','unchanged','empty'].includes(p.outcome)&&p.lastSuccess&&p.lastSuccess>=(job.startedAt||Date.now())-CACHE_MS));
@@ -82,41 +95,81 @@ function finishJob(state){
 }
 async function createSyncTab(state){
   const job=state.job;
-  const tab=await chrome.tabs.create({url:job.currentURL,active:false});job.tabId=tab.id;job.tabOwned=true;job.startedPageAt=Date.now();
+  if(job.rendererUnavailable)throw Error('Open this course list to finish syncing; the temporary tab is in use or was closed.');
+  if(job.renderTabId){
+    let tab;
+    try{
+      tab=await chrome.tabs.get(job.renderTabId);
+      if(!ownsLocation(tab,job.renderURL))throw Error('Tab taken over');
+    }catch{delete state.syncTabs[job.renderTabId];job.renderTabId=null;job.tabId=null;job.rendererUnavailable=true;}
+    if(job.renderTabId){
+      const previous=job.renderURL;
+      job.tabId=tab.id;job.tabOwned=true;job.transport='tab';job.startedPageAt=Date.now();job.renderURL=job.currentURL;
+      state.syncTabs[tab.id]={url:job.currentURL,runId:job.runId};await save(state);
+      try{await chrome.tabs.update(tab.id,{url:job.currentURL});return;}
+      catch{job.renderURL=previous;job.rendererUnavailable=true;throw Error('Could not refresh the temporary tab.');}
+    }
+  }
+  if(job.rendererCreated||job.rendererUnavailable)throw Error('Open this course list to finish syncing; the temporary tab is in use or was closed.');
+  const tab=await chrome.tabs.create({url:job.currentURL,active:false});
+  job.tabId=tab.id;job.renderTabId=tab.id;job.renderURL=job.currentURL;job.rendererCreated=true;job.tabOwned=true;job.transport='tab';job.startedPageAt=Date.now();
   state.syncTabs ||= {};state.syncTabs[tab.id]={url:job.currentURL,runId:job.runId};await save(state);
 }
-async function replaceBorrowed(runId,tabId){
+async function replaceBorrowed(runId,tabId,token){
   const state=await read(),job=state.job;
-  if(!job?.running||job.runId!==runId||job.tabId!==tabId||job.tabOwned!==false)return;
+  if(!job?.running||job.runId!==runId||job.tabId!==tabId||job.tabOwned!==false||token&&job.pageToken!==token)return;
   job.tabId=null;await save(state);
-  try{await createSyncTab(state);}catch{await advance(state,'Could not open a refresh tab.');}
+  try{await createSyncTab(state);}catch(error){await advance(state,error.message);}
+}
+async function renderPage(state){
+  const job=state.job;
+  try{
+    const candidates=await chrome.tabs.query({url:new URL(job.currentURL).origin+'/*'});
+    const existing=candidates.find(tab=>!state.syncTabs?.[tab.id]&&C.canonicalURL(tab.url)===job.currentURL);
+    if(existing&&chrome.tabs.sendMessage){
+      job.tabId=existing.id;job.tabOwned=false;job.transport='borrowed';job.startedPageAt=Date.now();await save(state);
+      const token=job.pageToken;
+      // The reply may depend on CAPTURE taking the storage lock, so do not await it here.
+      chrome.tabs.sendMessage(existing.id,{type:'RESCAN',requestId:token,requireFresh:!!job.force,force:job.force}).then(reply=>{
+        if(reply?.readerVersion!==4||reply.needsReload)locked(()=>replaceBorrowed(job.runId,existing.id,token));
+      },()=>locked(()=>replaceBorrowed(job.runId,existing.id,token)));
+    }else await createSyncTab(state);
+  }catch(error){await advance(state,error.message||'Could not read this page');}
+}
+function beginFetch(state){
+  const job=state.job,runId=job.runId,token=job.pageToken,url=job.currentURL,controller=new AbortController();requests.set(runId,controller);
+  // Network and parser work happen outside the state lock so Stop remains responsive.
+  DNBackground.read(url,state.settings,{signal:controller.signal}).then(result=>locked(async()=>{
+    if(requests.get(runId)===controller)requests.delete(runId);
+    const latest=await read(),current=latest.job;
+    if(!current?.running||current.runId!==runId||current.pageToken!==token||current.transport!=='fetch')return;
+    if(result.kind==='snapshot'){
+      current.background=(current.background||0)+1;await save(latest);
+      await capture({...result.snapshot,requestId:token},{url:result.snapshot.pageURL,tab:{id:-1,url:result.snapshot.pageURL}},true);
+    }else if(result.kind==='login'){
+      blockSource(latest,C.sourceFor(url));await advance(latest);
+    }else if(result.kind==='error')await advance(latest,result.message);
+    else if(result.kind!=='cancelled')await renderPage(latest);
+  })).catch(error=>console.error('Sync read failed:',error.message));
 }
 async function advance(state,error='',preserveTab=false){
   const job=state.job;if(!job?.running)return;
-  if(job.tabId){job.checked++;if(error){const outcome={code:/sign.in/i.test(error)?'login':'error',message:error,success:false};recordResult(state,job.currentURL,outcome);const page=state.pages[job.currentURL];if(page)Object.assign(page,{outcome:outcome.code,message:error,lastAttempt:Date.now()});}}
-  await releaseCurrent(state,preserveTab);
-  job.queue=job.queue.filter(url=>canSync(state,url));
+  if(job.transport||job.tabId){
+    job.checked++;
+    if(error){const outcome={code:'error',message:error,success:false};recordResult(state,job.currentURL,outcome);const page=state.pages[job.currentURL];if(page)Object.assign(page,{outcome:outcome.code,message:error,lastAttempt:Date.now()});}
+  }
+  await releaseCurrent(state,preserveTab,true);
+  job.queue=job.queue.filter(url=>canSync(state,url)&&!job.blockedSources?.[C.sourceFor(url)]);
   while(job.queue.length&&job.checked<60){
     job.currentURL=job.queue.shift();const page=state.pages[job.currentURL];
     if(!job.force&&page?.lastSuccess&&Date.now()-page.lastSuccess<CACHE_MS&&goodCodes.has(page.outcome)){
       job.skipped=(job.skipped||0)+1;recordResult(state,job.currentURL,{code:'cached',message:'Recently checked; kept existing data',success:true},page.count);continue;
     }
-    job.startedPageAt=Date.now();await save(state);
-    try{
-      const candidates=await chrome.tabs.query({url:new URL(job.currentURL).origin+'/*'});
-      const existing=candidates.find(tab=>!state.syncTabs?.[tab.id]&&C.canonicalURL(tab.url)===job.currentURL);
-      if(existing&&chrome.tabs.sendMessage){
-        job.tabId=existing.id;job.tabOwned=false;await save(state);
-        // Do not await a content reply while holding the storage lock: its CAPTURE uses that lock.
-        chrome.tabs.sendMessage(existing.id,{type:'RESCAN',requestId:job.runId,requireFresh:true,force:job.force}).then(reply=>{
-          if(reply?.readerVersion!==3||reply.needsReload)locked(()=>replaceBorrowed(job.runId,existing.id));
-        },()=>locked(()=>replaceBorrowed(job.runId,existing.id)));
-      }else await createSyncTab(state);
-      return;
-    }catch{recordResult(state,job.currentURL,{code:'error',message:'Could not open this page',success:false});job.checked++;}
+    job.pageToken=job.runId+':'+(job.sequence=(job.sequence||0)+1);job.transport='fetch';job.startedPageAt=Date.now();await save(state);
+    beginFetch(state);return;
   }
   if(job.queue.length)recordResult(state,job.currentURL,{code:'partial',message:'Sync limit reached; some pages remain',success:false});
-  finishJob(state);await save(state);
+  await releaseCurrent(state);finishJob(state);await save(state);
 }
 function sanitizedSnapshot(snapshot,sender,state){
   if(!sender.tab||!C.allowedURL(sender.url)||!snapshot||C.canonicalURL(sender.url)!==C.canonicalURL(snapshot.pageURL))throw new Error('Invalid page capture');
@@ -136,10 +189,22 @@ function sanitizedSnapshot(snapshot,sender,state){
   const q=snapshot.quality||{},quality={explicitEmpty:!!q.explicitEmpty,partial:!!q.partial,preview:!!q.preview,rowCount:Math.max(0,Math.min(500,Number(q.rowCount)||0)),unreadableRows:Math.max(0,Math.min(500,Number(q.unreadableRows)||0))};
   return {source,pageURL,frameURL,items,links,course,kind,quality,requestId:C.clean(snapshot.requestId,100),pageError:!!snapshot.pageError,title:C.clean(snapshot.title,160),login:!!snapshot.login,settled:!!snapshot.settled,embedded:!!snapshot.embedded};
 }
-async function capture(snapshot,sender){
+function matchesCurrentPage(job,sender){
+  const actual=C.canonicalURL(sender.tab?.url||sender.url),expected=C.canonicalURL(job?.currentURL);
+  if(!actual||!expected)return false;
+  if(actual===expected)return true;
+  if(C.sourceFor(actual)!==C.sourceFor(expected))return false;
+  if(isSignInURL(actual)||C.sourceFor(actual)==='brightspace'&&/\/d2l\/error\//i.test(new URL(actual).pathname))return true;
+  if(C.sourceFor(actual)==='pearson')return !!(C.pageKind(actual)&&C.courseId(actual)&&C.courseId(actual)===C.courseId(expected));
+  if(C.sourceFor(actual)==='gradescope'){const a=new URL(actual),b=new URL(expected);a.hostname=b.hostname='www.gradescope.com';return a.href===b.href;}
+  return false;
+}
+async function capture(snapshot,sender,background=false){
   const state=await read(),snap=sanitizedSnapshot(snapshot,sender,state),now=Date.now();
   if(state.settings.collecting===false)return {ok:true,paused:true};
   if(!snap.kind&&!snap.login&&!snap.pageError)return {ok:true};
+  const current=state.job;
+  if(current?.running&&sender.tab.id===current.renderTabId&&current.pageToken&&(!matchesCurrentPage(current,sender)||snap.requestId!==current.pageToken))return {ok:true,ignored:true};
   const course=registerCourse(state,{...snap.course,source:snap.source,url:snap.pageURL});
   const included=course&&C.isCourseActive(state,course.key);
   const items=included?snap.items.map(i=>({...i,courseKey:course.key,course:course.title,term:course.term})):[];
@@ -158,19 +223,24 @@ async function capture(snapshot,sender){
   }
   const job=state.job;
   const usableFrame=sender.frameId===undefined||sender.frameId===0||snap.source==='pearson'&&(snap.items.length>0||snap.quality.explicitEmpty);
-  const requested=job?.tabOwned!==false||snap.requestId===job.runId;
+  const requested=job?.pageToken?snap.requestId===job.pageToken:job?.tabOwned!==false||snap.requestId===job.runId;
+  const matches=background?job?.transport==='fetch':job?.tabId===sender.tab.id;
   const waitingForFrame=snap.embedded&&!snap.items.length&&!snap.quality.explicitEmpty&&!snap.login&&!snap.pageError;
-  if(job?.running&&job.tabId===sender.tab.id&&snap.settled&&usableFrame&&requested&&!waitingForFrame){
-    for(const link of snap.links)if(canSync(state,link.url)&&!job.seen.includes(link.url)&&job.seen.length<60){job.seen.push(link.url);job.queue.push(link.url);}
+  if(job?.running&&matches&&requested&&!background&&job.tabOwned===false&&snap.settled&&(['partial','unreadable'].includes(outcome.code)||waitingForFrame)){
+    await save(state);await replaceBorrowed(job.runId,job.tabId,job.pageToken);return {ok:true,included:!!included,outcome:outcome.code};
+  }
+  if(job?.running&&matches&&snap.settled&&usableFrame&&requested&&!waitingForFrame){
+    for(const link of snap.links)if(canSync(state,link.url)&&!job.blockedSources?.[C.sourceFor(link.url)]&&!job.seen.includes(link.url)&&job.seen.length<60){job.seen.push(link.url);job.queue.push(link.url);}
     job.itemIds ||= {};job.changed ||= 0;
     for(const item of items){
       const identity=C.assignmentId(item),saved=state.items[identity]||Object.values(state.items).find(i=>C.assignmentId(i)===identity)||Object.values(state.items).filter(i=>i.source===item.source&&i.courseId===item.courseId&&i.title.toLowerCase()===C.assignmentTitle(item).toLowerCase());
       const record=Array.isArray(saved)?saved.length===1?saved[0]:null:saved;if(!record)continue;
       const id=record.id,old=before[id];if(!job.itemIds[id]&&(!old||old.title!==record.title||old.status!==record.status||!C.sameDeadline(old,record)))job.changed++;job.itemIds[id]=true;
     }
-    if(job.tabOwned===false)job.reused=(job.reused||0)+1;
+    if(!background&&job.tabOwned===false)job.reused=(job.reused||0)+1;
     recordResult(state,job.currentURL,outcome,items.length);
     if(snap.pageURL!==job.currentURL&&state.pages[job.currentURL])Object.assign(state.pages[job.currentURL],{outcome:outcome.code,message:outcome.message,lastAttempt:now});
+    if(snap.login)blockSource(state,snap.source);
     await advance(state,'',snap.login);
   }else await save(state);
   return {ok:true,included:!!included,outcome:outcome.code};
@@ -181,7 +251,7 @@ async function rescanOpenTabs(){
   for(const tab of await chrome.tabs.query({url:urls}))try{await chrome.tabs.sendMessage(tab.id,{type:'RESCAN'});}catch{}
 }
 async function dispatch(message,sender){
-  if(message?.type==='CONTENT_SETTINGS'&&sender.tab&&C.allowedURL(sender.url)){const state=await read();return {settings:state.settings,syncOwned:!!state.job?.running&&state.job.tabId===sender.tab.id&&state.job.tabOwned!==false};}
+  if(message?.type==='CONTENT_SETTINGS'&&sender.tab&&C.allowedURL(sender.url)){const state=await read(),current=state.job?.running&&state.job.tabId===sender.tab.id&&matchesCurrentPage(state.job,sender);return {settings:state.settings,requestId:current?state.job.pageToken||'':'',syncOwned:!!current&&state.job.tabOwned!==false};}
   if(message?.type==='CAPTURE')return capture(message.snapshot,sender);
   if(!trusted(sender))throw new Error('Only the extension dashboard can perform this action');
   const state=await read();
@@ -193,7 +263,7 @@ async function dispatch(message,sender){
       if(state.job?.running)return {ok:true};if(state.settings.collecting===false)throw new Error('Enable collection in Settings.');
       await ensureAlarm();const pearson=await pearsonEnabled();
       const urls=[...new Set([...C.HOMES,...(pearson?[PEARSON_HOME]:[]),...Object.keys(state.pages).filter(url=>canSync(state,url)&&(C.sourceFor(url)!=='pearson'||pearson))])].slice(0,60);
-      state.job={runId:String(Date.now())+'-'+Math.random().toString(36).slice(2),force:!!message.force,sources:[...new Set(urls.map(C.sourceFor))],results:{},itemIds:{},changed:0,reused:0,skipped:0,running:true,queue:urls,seen:[...urls],checked:0,errors:[],tabId:null,startedAt:Date.now(),note:'Checking current courses...'};await advance(state);return {ok:true};
+      state.job={runId:String(Date.now())+'-'+Math.random().toString(36).slice(2),force:!!message.force,sources:[...new Set(urls.map(C.sourceFor))],results:{},itemIds:{},changed:0,reused:0,skipped:0,background:0,blockedSources:{},rendererCreated:false,running:true,queue:urls,seen:[...urls],checked:0,errors:[],tabId:null,startedAt:Date.now(),note:'Checking current courses...'};await advance(state);return {ok:true};
     }
     case 'STOP_SYNC':if(state.job?.running){await releaseCurrent(state);state.job.running=false;state.job.note='Sync stopped.';await save(state);}return {ok:true};
     case 'SET_COURSE':{
@@ -227,12 +297,29 @@ async function dispatch(message,sender){
     default:throw new Error('Unknown request');
   }
 }
-chrome.runtime.onMessage.addListener((message,sender,reply)=>{locked(()=>dispatch(message,sender)).then(reply,error=>reply({error:error.message}));return true;});
-chrome.tabs.onRemoved.addListener(id=>locked(async()=>{const state=await read();if(state.opening?.[id]){delete state.opening[id];await save(state);}if(state.job?.running&&state.job.tabId===id)await advance(state,'A sync tab was closed.');}));
+chrome.runtime.onMessage.addListener((message,sender,reply)=>{if(message?.target==='offscreen-parser')return;locked(()=>dispatch(message,sender)).then(reply,error=>reply({error:error.message}));return true;});
+chrome.tabs.onRemoved.addListener(id=>locked(async()=>{
+  const state=await read(),job=state.job;if(state.opening?.[id])delete state.opening[id];
+  if(job?.renderTabId===id){job.renderTabId=null;job.rendererUnavailable=true;delete state.syncTabs?.[id];}
+  if(job?.running&&job.tabId===id){job.tabId=null;await advance(state,'A sync tab was closed.');}else await save(state);
+}));
+chrome.tabs.onActivated?.addListener(({tabId})=>locked(async()=>{
+  const state=await read(),job=state.job;
+  if(job?.renderTabId!==tabId)return;
+  job.renderTabId=null;job.rendererUnavailable=true;delete state.syncTabs?.[tabId];
+  if(job.tabId===tabId)job.tabOwned=false;await save(state);
+}));
 chrome.alarms.onAlarm.addListener(alarm=>{
   if(alarm.name!=='maintenance')return;
   locked(async()=>{
-    const state=await read();if(state.job?.running&&Date.now()-state.job.startedPageAt>55000){if(state.job.tabOwned===false){await replaceBorrowed(state.job.runId,state.job.tabId);return;}await advance(state,'Page timed out or needs sign-in. Open the site and retry.');return;}
+    const state=await read(),job=state.job;
+    if(job?.running&&Date.now()-job.startedPageAt>55000){
+      if(job.transport==='fetch'){cancelRequest(job);await renderPage(state);return;}
+      if(job.tabOwned===false){await replaceBorrowed(job.runId,job.tabId,job.pageToken);return;}
+      let login=false;try{login=isSignInURL((await chrome.tabs.get(job.tabId)).url);}catch{}
+      if(login)blockSource(state,C.sourceFor(job.currentURL));
+      await advance(state,login?'':'Page timed out. Open the course list to check it.',login);return;
+    }
     for(const [id,opening] of Object.entries(state.opening||{}))if(Date.now()>opening.expires)delete state.opening[id];
     for(const item of C.dueReminders(state).slice(0,5)){
       await chrome.notifications.create(`due:${item.id}`,{type:'basic',iconUrl:'icons/128.png',title:`Due soon · ${item.course}`,message:`${item.title}\n${new Date(item.dueAt).toLocaleString('en-US',{timeZone:state.settings.zone})}`});state.items[item.id].remindedFor=item.dueAt;
@@ -249,10 +336,17 @@ async function openAssignment(item,state){
     state ||= await read();state.opening ||= {};state.opening[tab.id]={url,fallback:C.courseListURL(item),expires:Date.now()+120000};await save(state);
   }
 }
+function isSignInURL(url){
+  try{const u=new URL(url);return /(?:^|\.)(?:login\.microsoftonline\.com|login\.pearson\.com|idp\.purdue\.edu|purdue\.login\.duosecurity\.com)$/.test(u.hostname)||/\/(?:login|signin|sign-in|auth|sso|saml|cas)(?:[/.]|$)/i.test(u.pathname);}catch{return false;}
+}
 chrome.tabs.onUpdated?.addListener((id,change,tab)=>{
   if(!change.url)return;
   locked(async()=>{
-    const state=await read(),opening=state.opening?.[id];if(!opening)return;
+    const state=await read(),job=state.job;
+    if(job?.running&&job.tabId===id&&isSignInURL(change.url)){
+      blockSource(state,C.sourceFor(job.currentURL));await advance(state,'',true);return;
+    }
+    const opening=state.opening?.[id];if(!opening)return;
     if(Date.now()>opening.expires){delete state.opening[id];await save(state);return;}
     const url=C.canonicalURL(change.url);
     if(url&&C.sourceFor(url)==='brightspace'&&/\/d2l\/error\/(?:500|404)/i.test(new URL(url).pathname)){

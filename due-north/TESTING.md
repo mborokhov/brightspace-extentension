@@ -1,8 +1,8 @@
-# Validation record — v0.3.0
+# Validation record — v0.4.0
 
 ## Verified
 
-- **56 Node tests**: URL boundaries; safe page routes; timezone/DST/date parsing; stable IDs; local completion and deadline preservation; reminders and calendar export; current-semester migration and rollover; week counts across midnight; serialized writes; sender validation; sync queue restrictions/recovery; sign-in handling; user-tab preservation; optional Pearson registration; embedded-frame course association and parent-page waiting; collection timing and mutation handling.
+- **71 Node tests**: URL boundaries; safe page routes; timezone/DST/date parsing; stable IDs; local completion and deadline preservation; reminders and calendar export; current-semester migration and rollover; week counts across midnight; serialized writes; sender validation; sync queue restrictions/recovery; sign-in handling; user-tab preservation; optional Pearson registration; embedded-frame course association and parent-page waiting; collection timing and mutation handling.
 - **26 browser DOM fixtures**: release/due/late date selection including the supplied Gradescope timeline; Brightspace quiz names, inline due dates and populated Evaluation Status; Not Submitted assignments with JavaScript links; unreadable dates; course term sections; hidden rows, shadow roots and duplicates; MyLab due/status/progress columns, plain names, completion icons and stable IDs.
 - **Static checks**: JavaScript syntax, manifest/assets, no inline scripts, scoped host access. Git whitespace check passes.
 - **Interactive sample dashboard**: two navigation views; deadline editing updates list/chart/calendar; restore source date; completion and Completed filter; search; month navigation; current-course dialog excludes older courses; invalid timezone rejection; first-install empty state. Overview and Calendar visually inspected; no console errors observed during these checks.
@@ -22,6 +22,16 @@ Screenshot-derived fixtures cover MyLab’s Due-first table with `09/06/26 11:59
 - DOM checks for partial/empty diagnostics, missed rows, MyLab td headers, and error pages.
 - Sample dashboard visually checked for stale/partial source state and simultaneous source/custom dates. Restoring the source date updated the list and weekly counts. Calendar and Sync details opened correctly; no console errors observed. Exactly two navigation views remain.
 
+## v0.4.0 regression checks
+
+- Background transport: credentialed read-only requests, manual redirect handling, HTML-only parsing, response size limits, parser reuse, cancellation, login detection, and HTTP error reporting.
+- Zero-tab completion for readable selected courses; a single temporary tab reused across rendered pages and closed on completion.
+- Existing tabs remain unchanged; unreadable existing pages fall back to rendering. User activation or closure relinquishes the temporary tab without spawning replacements.
+- Sign-in failures skip the remaining pages on that source. Stop/Clear abort requests; old responses and old document tokens cannot advance a new page.
+- The offscreen parser validates internal messages and parses detached documents under a restrictive content policy. Chrome API behavior is mocked in Node; the existing 26 browser fixtures exercise actual DOMParser extraction.
+
+The available browser has no signed-in school tabs. Real Chrome/Edge offscreen lifecycle, session-cookie behavior, and live Brightspace/Gradescope/Pearson responses still need installed-extension verification. Background reads can legitimately fall back to the one-tab renderer.
+
 ## Reproduce
 
 ```sh
@@ -34,12 +44,13 @@ Open `http://127.0.0.1:4173/tests/browser.html` for the DOM fixtures. The sample
 
 ## Live acceptance
 
-1. Reload the unpacked extension and your school tabs. Check for extension errors.
+1. Reload the unpacked extension and your school tabs. Check for extension errors. In v0.4.0 the manifest adds the offscreen permission for the hidden HTML parser.
 2. Open current course lists and select unlabelled current classes in Courses. Confirm previous-semester courses are absent from the dashboard and sync queue.
 3. Compare Gradescope's right-hand due date (not release or late cutoff), Brightspace quiz names/Due on lines/Evaluation Status, and Not Submitted assignment rows.
 4. Edit a deadline, sync again, and confirm the edit persists in the list, chart, calendar and exported .ics. Restore the source date.
 5. Enable MyLab Math's optional access and reload Homework and Tests. Confirm the course if needed. Compare titles, due dates and status with the portal/embedded table. Unsupported layouts need a redacted fixture and adapter update.
 6. Check paginated lists, sign-in expiry and sync details. Try reminders while the browser is running; browser/OS settings may suppress notifications.
-7. Reload the extension; local choices should persist. A fresh browser profile starts empty. The source ZIP contains no user storage.
+7. Run a sync across several courses. Background-readable pages should create no tabs; rendered pages should reuse one inactive tab. Activate or close that tab and confirm it is not replaced. Stop during a slow read and verify no late assignments arrive from that run. Sign out of one source, sync, and confirm its remaining pages are skipped with a sign-in message.
+8. Reload the extension; local choices should persist. A fresh browser profile starts empty. The source ZIP contains no user storage.
 
 Do not add credentials, account pages, submitted work, browser profiles, or private calendar exports to test fixtures or the shared project.

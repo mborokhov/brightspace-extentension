@@ -3,20 +3,25 @@ function harness(saved,pearson=false) {
   const events={};const event=name=>({addListener:fn=>{events[name]=fn;}});
   const store=saved?structuredClone(saved):{},tabs=new Map(),removed=[],notifications=[],created=[];
   let nextTab=1;
-  const rescans=[],updates=[],rescan={handle:async()=>({readerVersion:3})};
+  const rescans=[],updates=[],rescan={handle:async()=>({readerVersion:4})};
   const scripts=[];const chrome={permissions:{contains:async()=>pearson,onRemoved:event('permissionRemoved')},scripting:{getRegisteredContentScripts:async()=>scripts,unregisterContentScripts:async()=>{scripts.length=0;},registerContentScripts:async value=>scripts.push(...value)},runtime:{id:'test-extension',getURL:p=>'chrome-extension://test-extension/'+p,onMessage:event('message'),onInstalled:event('installed'),onStartup:event('startup')},
     storage:{local:{get:async key=>structuredClone({[key]:store[key]}),set:async value=>Object.assign(store,structuredClone(value)),setAccessLevel:async()=>{}}},
     action:{onClicked:event('action')},alarms:{create:async()=>{},onAlarm:event('alarm')},
-    tabs:{query:async options=>[...tabs.values()].filter(t=>!options?.url||(Array.isArray(options.url)?options.url:[options.url]).some(u=>t.url?.startsWith(u.replace(/\*$/,'')))),sendMessage:async(id,message)=>{rescans.push({id,message});return rescan.handle(id,message);},create:async options=>{const tab={...options,id:nextTab++};tabs.set(tab.id,tab);created.push(tab);return tab;},get:async id=>{if(!tabs.has(id))throw Error('No tab');return tabs.get(id);},update:async(id,change)=>{updates.push({id,change});if(tabs.has(id))Object.assign(tabs.get(id),change);},onUpdated:event('updated'),remove:async id=>{removed.push(id);tabs.delete(id);},onRemoved:event('removed')},
+    tabs:{query:async options=>[...tabs.values()].filter(t=>!options?.url||(Array.isArray(options.url)?options.url:[options.url]).some(u=>t.url?.startsWith(u.replace(/\*$/,'')))),sendMessage:async(id,message)=>{rescans.push({id,message});return rescan.handle(id,message);},create:async options=>{const tab={...options,id:nextTab++};tabs.set(tab.id,tab);created.push(tab);return tab;},get:async id=>{if(!tabs.has(id))throw Error('No tab');return tabs.get(id);},update:async(id,change)=>{updates.push({id,change});if(tabs.has(id))Object.assign(tabs.get(id),change);},onUpdated:event('updated'),onActivated:event('activated'),remove:async id=>{removed.push(id);tabs.delete(id);},onRemoved:event('removed')},
     notifications:{create:async(id,options)=>{notifications.push({id,options});},onClicked:event('notification')}
   };
-  const context=vm.createContext({chrome,console,URL,Date,Intl,TextEncoder,setTimeout,clearTimeout});
-  context.importScripts=file=>vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension',file),'utf8'),context);
+  const context=vm.createContext({chrome,console,URL,Date,Intl,TextEncoder,AbortController,setTimeout,clearTimeout});
+  context.importScripts=(...files)=>{for(const file of files)vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension',file),'utf8'),context);};
   vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension/background.js'),'utf8'),context);
+  const reads=[],transport={handle:async()=>({kind:'render'})};context.DNBackground.read=async(...args)=>{reads.push(args);return transport.handle(...args);};
   const admin={id:'test-extension',url:'chrome-extension://test-extension/dashboard.html'};
-  const message=(payload,sender=admin)=>new Promise(resolve=>events.message(payload,sender,resolve));
+  const message=async(payload,sender=admin)=>{
+    if(payload.type==='CAPTURE'&&payload.snapshot.requestId===undefined&&store.state?.job?.tabId===sender.tab?.id)payload={...payload,snapshot:{...payload.snapshot,requestId:store.state.job.pageToken}};
+    const result=await new Promise(resolve=>events.message(payload,sender,resolve));
+    await new Promise(resolve=>setImmediate(resolve));return result;
+  };
   const settle=()=>message({type:'GET_STATE'});
-  return {store,tabs,scripts,rescans,updates,rescan,removed,notifications,created,events,message,settle,admin,context};
+  return {reads,transport,store,tabs,scripts,rescans,updates,rescan,removed,notifications,created,events,message,settle,admin,context};
 }
 const C=require('../extension/core.js'),term=C.currentTerm();
 const url='https://www.gradescope.com/courses/42';
@@ -49,14 +54,14 @@ test('sync discovers only allowlisted pages, persists queue and does not close u
  assert.equal(s.job.running,true);assert.equal(h.created.length,1);
  const current=s.job.currentURL,tabId=s.job.tabId;
  await h.message({type:'CAPTURE',snapshot:{pageURL:current,title:'Home',items:[],links:[{url:'https://purdue.brightspace.com/d2l/home/123',title:'Course',term},{url:'https://evil.test/',title:'Bad'}],settled:true}}, {id:'test-extension',url:current,tab:{id:tabId}});
- s=(await h.settle()).state;assert.equal(s.job.checked,1);assert.ok(s.job.seen.includes('https://purdue.brightspace.com/d2l/home/123'));assert.ok(!s.job.seen.includes('https://evil.test/'));assert.ok(h.removed.includes(tabId));assert.ok(!h.removed.includes(500));
+ s=(await h.settle()).state;assert.equal(s.job.checked,1);assert.ok(s.job.seen.includes('https://purdue.brightspace.com/d2l/home/123'));assert.ok(!s.job.seen.includes('https://evil.test/'));assert.ok(!h.removed.includes(tabId));assert.equal(h.created.length,1);assert.equal(h.store.state.job.tabId,tabId);assert.ok(!h.removed.includes(500));
  await h.message({type:'STOP_SYNC'});assert.equal((await h.settle()).state.job.running,false);
 });
 test('SSO redirect times out, reports sign-in requirement and leaves external sign-in tab open',async()=>{
  const h=harness();await h.message({type:'SYNC'});let s=h.store.state;
  const id=s.job.tabId;h.tabs.get(id).url='https://login.microsoftonline.com/purdue';s.job.startedPageAt=Date.now()-90000;
  h.events.alarm({name:'maintenance'});await h.settle();
- assert.ok(!h.removed.includes(id));assert.match(h.store.state.job.errors[0],/sign-in/);
+ assert.ok(!h.removed.includes(id));assert.match(h.store.state.job.errors[0],/sign[- ]in/i);
 });
 test('same-domain login page is preserved while queue continues',async()=>{
  const h=harness();await h.message({type:'SYNC'});const job=h.store.state.job;
@@ -143,7 +148,8 @@ test('Pearson embedded list routes are accepted by observed layout and inherit t
 test('content settings disclose sync ownership only for the temporary sync tab',async()=>{
  const h=harness();await h.message({type:'SYNC'});const job=h.store.state.job;
  assert.equal((await h.message({type:'CONTENT_SETTINGS'},sender)).syncOwned,false);
- assert.equal((await h.message({type:'CONTENT_SETTINGS'},{...sender,tab:{id:job.tabId}})).syncOwned,true);
+ assert.equal((await h.message({type:'CONTENT_SETTINGS'},{...sender,url:job.currentURL,tab:{id:job.tabId}})).syncOwned,true);
+ assert.equal((await h.message({type:'CONTENT_SETTINGS'},{...sender,tab:{id:job.tabId}})).syncOwned,false);
 });
 
 function singlePageJob(){
@@ -184,11 +190,11 @@ test('repeated captures report unchanged and preserve local corrections; source 
 test('sync reuses matching open tabs without navigating or closing them',async()=>{
  const h=harness(),home=C.HOMES[0];h.tabs.set(500,{id:500,url:home,active:true});await h.message({type:'SYNC'});
  const job=h.store.state.job;assert.equal(job.tabId,500);assert.equal(job.tabOwned,false);assert.equal(h.created.length,0);
- await h.message({type:'CAPTURE',snapshot:{pageURL:home,title:'Home',items:[],links:[],settled:true,requestId:job.runId}},{id:'test-extension',url:home,tab:{id:500}});
+ await h.message({type:'CAPTURE',snapshot:{pageURL:home,title:'Home',items:[],links:[],settled:true,requestId:job.pageToken}},{id:'test-extension',url:home,tab:{id:500}});
  assert.equal(h.store.state.job.reused,1);assert.ok(!h.removed.includes(500));assert.equal(h.updates.length,0);
 });
 test('stale readers get a fresh temporary tab without changing the user tab',async()=>{
- const h=harness();h.tabs.set(500,{id:500,url:C.HOMES[0],active:true});h.rescan.handle=async()=>({readerVersion:3,needsReload:true});await h.message({type:'SYNC'});await h.settle();await h.settle();
+ const h=harness();h.tabs.set(500,{id:500,url:C.HOMES[0],active:true});h.rescan.handle=async()=>({readerVersion:4,needsReload:true});await h.message({type:'SYNC'});await h.settle();await h.settle();
  assert.equal(h.created.length,1);assert.equal(h.store.state.job.tabOwned,true);assert.equal(h.tabs.get(500).url,C.HOMES[0]);assert.ok(!h.removed.includes(500));
 });
 test('recent successes are skipped while force refresh bypasses the cache',async()=>{
@@ -214,4 +220,61 @@ test('timezone display changes preserve the source-date baseline without inventi
  const custom=h.store.state.items[id].dueOverride;
  await h.message({type:'SET_SETTINGS',settings:{zone:'America/Los_Angeles',leadHours:6,reminders:false}});
  const item=h.store.state.items[id];assert.equal(C.sameDeadline(item.overrideSourceDue,item),true);assert.deepEqual(item.dueOverride,custom);
+});
+
+const homeSnapshot=pageURL=>({pageURL,kind:'home',title:'Courses',items:[],links:[],course:{},quality:{},settled:true});
+function selectedPages(source='gradescope'){
+ const state=C.emptyState();
+ for(const home of C.HOMES)state.pages[home]={url:home,source:C.sourceFor(home),kind:'home',lastSuccess:Date.now(),outcome:'discovered'};
+ for(const id of ['42','43']){const link=source==='gradescope'?`https://www.gradescope.com/courses/${id}`:`https://purdue.brightspace.com/d2l/home/${id}`,key=source+':'+id;state.courses[key]={key,id,source,title:'Course '+id,term,enabled:true};state.pages[link]={url:link,source,kind:'course',courseKey:key};}
+ return state;
+}
+test('background reads finish selected courses without opening or navigating tabs',async()=>{
+ const h=harness({state:selectedPages()});h.transport.handle=async page=>({kind:'snapshot',snapshot:snapshot({pageURL:page,course:{id:C.courseId(page),title:'Course',term}})});
+ await h.message({type:'SYNC'});await h.settle();
+ assert.equal(h.store.state.job.running,false);assert.equal(h.store.state.job.background,2);assert.equal(h.created.length,0);assert.equal(h.updates.length,0);assert.equal(Object.keys(h.store.state.items).length,2);assert.ok(h.store.state.sources.gradescope.lastSuccess);
+});
+test('one fallback tab is reused across pages and closed only after the run',async()=>{
+ const h=harness({state:selectedPages()});await h.message({type:'SYNC'});const first={...h.store.state.job},id=first.tabId;
+ await h.message({type:'CAPTURE',snapshot:snapshot()},{...sender,tab:{id}});
+ const second={...h.store.state.job};assert.equal(second.tabId,id);assert.equal(h.created.length,1);assert.equal(h.removed.length,0);assert.equal(h.updates.at(-1).change.url,second.currentURL);
+ await h.message({type:'CAPTURE',snapshot:snapshot({pageURL:second.currentURL,course:{id:'43',title:'Course',term}})},{...sender,url:second.currentURL,tab:{id}});
+ assert.equal(h.created.length,1);assert.deepEqual(h.removed,[id]);assert.equal(h.store.state.job.running,false);
+});
+test('Stop and Clear cancel pending requests and discard late background results',async()=>{
+ for(const action of ['STOP_SYNC','CLEAR']){
+  const h=harness({state:selectedPages()});let complete,signal;
+  h.transport.handle=async(_url,_settings,options)=>{signal=options.signal;return new Promise(resolve=>{complete=resolve;});};
+  await h.message({type:'SYNC'});await h.message({type:action});assert.equal(signal.aborted,true);
+  complete({kind:'snapshot',snapshot:snapshot()});await h.settle();await h.settle();
+  assert.equal(Object.keys(h.store.state.items).length,0);assert.equal(h.created.length,0);assert.ok(!h.store.state.job?.running);
+ }
+});
+test('expired login skips that platform and continues other background reads without opening login tabs',async()=>{
+ const state=selectedPages('brightspace');state.pages[C.HOMES[0]].lastSuccess=0;state.pages[C.HOMES[1]].lastSuccess=0;
+ const h=harness({state});h.transport.handle=async page=>C.sourceFor(page)==='brightspace'?{kind:'login'}:{kind:'snapshot',snapshot:homeSnapshot(page)};
+ await h.message({type:'SYNC'});await h.settle();
+ assert.deepEqual(h.reads.map(args=>args[0]),C.HOMES);assert.equal(h.created.length,0);assert.equal(h.store.state.job.running,false);assert.equal(h.store.state.sources.brightspace.outcome,'login');assert.match(h.store.state.sources.brightspace.message,/Sign in/);
+});
+test('login redirects pause the entire source immediately and preserve the single sign-in tab',async()=>{
+ const h=harness({state:selectedPages()});await h.message({type:'SYNC'});const id=h.store.state.job.tabId,login='https://www.gradescope.com/login';h.tabs.get(id).url=login;
+ h.events.updated(id,{url:login},h.tabs.get(id));await h.settle();
+ assert.equal(h.store.state.job.running,false);assert.equal(h.created.length,1);assert.equal(h.removed.length,0);assert.equal(h.reads.length,1);assert.equal(h.store.state.sources.gradescope.outcome,'login');
+});
+test('old render responses cannot advance the next page or import old content',async()=>{
+ const h=harness({state:selectedPages()});await h.message({type:'SYNC'});const first={...h.store.state.job};
+ await h.message({type:'CAPTURE',snapshot:snapshot()},{...sender,tab:{id:first.tabId}});const second={...h.store.state.job};
+ const stale=snapshot({requestId:first.pageToken,items:[{...snapshot().items[0],title:'Stale poison',url:url+'/assignments/999'}]});
+ await h.message({type:'CAPTURE',snapshot:stale},{...sender,tab:{id:first.tabId}});
+ assert.equal(h.store.state.job.currentURL,second.currentURL);assert.equal(h.store.state.job.checked,1);assert.ok(!Object.values(h.store.state.items).some(i=>i.title==='Stale poison'));
+});
+test('activating the fallback tab relinquishes it and does not create replacement tabs',async()=>{
+ const h=harness({state:selectedPages()});await h.message({type:'SYNC'});const id=h.store.state.job.tabId;h.tabs.get(id).active=true;h.events.activated({tabId:id});await h.settle();
+ await h.message({type:'CAPTURE',snapshot:snapshot()},{...sender,tab:{id}});await h.settle();
+ assert.equal(h.created.length,1);assert.equal(h.removed.length,0);assert.equal(h.updates.length,0);assert.equal(h.store.state.job.running,false);assert.ok(h.store.state.job.errors.length);
+});
+test('a partial borrowed page falls back without navigating the user tab',async()=>{
+ const h=harness({state:selectedPages()});h.tabs.set(500,{id:500,url,active:true});await h.message({type:'SYNC'});
+ const job=h.store.state.job;await h.message({type:'CAPTURE',snapshot:snapshot({quality:{partial:true},requestId:job.pageToken})},sender);
+ assert.equal(h.created.length,1);assert.equal(h.store.state.job.tabOwned,true);assert.equal(h.tabs.get(500).url,url);assert.ok(!h.updates.some(update=>update.id===500));
 });

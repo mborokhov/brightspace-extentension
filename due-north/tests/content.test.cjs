@@ -30,7 +30,7 @@ test('only sync-owned Pearson tabs open Assignments, then wait for the list to r
 
 test('fresh open pages tag requested scans; stale and forced scans request a background refresh',async()=>{
  const h=harness();await h.tick(6000);
- const fresh=await h.rescan({requireFresh:true,requestId:'run-1'});assert.equal(fresh.readerVersion,3);assert.equal(h.messages.at(-1).snapshot.requestId,'run-1');
+ const fresh=await h.rescan({requireFresh:true,requestId:'run-1'});assert.equal(fresh.readerVersion,4);assert.equal(h.messages.at(-1).snapshot.requestId,'run-1');
  assert.equal((await h.rescan({requireFresh:true,force:true})).needsReload,true);
  await h.tick(121000);const before=h.messages.length;assert.equal((await h.rescan({requireFresh:true})).needsReload,true);assert.equal(h.messages.length,before);
 });
