@@ -1,5 +1,6 @@
 'use strict';
-importScripts('core.js','background-fetch.js');
+importScripts('core.js','tasks.js','background-fetch.js');
+const T=DNTasks;
 const C=DNCore,PEARSON_ORIGINS=C.PEARSON_HOSTS.map(host=>`https://${host}/*`),PEARSON_HOME='https://mylabmastering.pearson.com/courses';
 let serial=Promise.resolve();
 const locked=fn=>{const result=serial.then(fn);serial=result.catch(()=>{});return result;};
@@ -17,7 +18,7 @@ async function configurePearson(){
   }else if(existing.length)await chrome.scripting.unregisterContentScripts({ids:['pearson-reader']});
 }
 async function ensureAlarm(){await chrome.alarms.create('maintenance',{periodInMinutes:1});await chrome.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'});}
-async function openDashboard(){const tabs=await chrome.tabs.query({url:dashboardURL()});if(tabs.length)await chrome.tabs.update(tabs[0].id,{active:true});else await chrome.tabs.create({url:dashboardURL()});}
+async function openDashboard(mode){const url=dashboardURL()+(mode==='add'?'#add='+Date.now():''),tabs=await chrome.tabs.query({url:dashboardURL()+'*'});if(tabs.length)await chrome.tabs.update(tabs[0].id,{active:true,...(mode==='add'?{url}:{})});else await chrome.tabs.create({url});}
 chrome.action.onClicked.addListener(openDashboard);
 chrome.runtime.onInstalled.addListener(()=>locked(async()=>{await ensureAlarm();await configurePearson();await save(await read());await openDashboard();}));
 chrome.runtime.onStartup.addListener(()=>locked(async()=>{await ensureAlarm();await configurePearson();const state=await read();if(state.job?.running){state.job.running=false;state.job.tabId=null;state.job.note='Sync paused after browser restart.';}state.syncTabs={};state.opening={};await save(state);}));
@@ -179,7 +180,7 @@ function sanitizedSnapshot(snapshot,sender,state){
   const course={id:C.clean(pearsonParent||snapshot.course?.id||C.courseId(frameURL),80),title:C.clean(snapshot.course?.title||snapshot.items?.[0]?.course||snapshot.title,160),term:C.parseTerm(snapshot.course?.term||snapshot.course?.title||snapshot.title)};
   const items=(Array.isArray(snapshot.items)?snapshot.items:[]).slice(0,500).flatMap(item=>{
     const url=C.canonicalURL(item.url);if(!url||C.sourceFor(url)!==source||!C.clean(item.title))return [];
-    return [{source,url,pageURL,title:C.clean(item.title,250),course:course.title,courseId:course.id||C.clean(item.courseId,80),nativeId:C.clean(item.nativeId,80),type:item.type==='quiz'?'quiz':'assignment',
+    return [{source,url,pageURL,relatedURLs:(Array.isArray(item.relatedURLs)?item.relatedURLs:[]).slice(0,6).map(value=>C.canonicalURL(value)).filter(value=>value&&C.sourceFor(value)!==source),title:C.clean(item.title,250),course:course.title,courseId:course.id||C.clean(item.courseId,80),nativeId:C.clean(item.nativeId,80),type:item.type==='quiz'?'quiz':'assignment',
       linkVersion:item.linkVersion===2?2:0,status:['submitted','graded','not-submitted'].includes(item.status)?item.status:'unknown',...C.parseDue(C.clean(item.dueRaw,500),state.settings.zone)}];
   });
   const links=(Array.isArray(snapshot.links)?snapshot.links:[]).slice(0,150).flatMap(link=>{
@@ -256,8 +257,14 @@ async function dispatch(message,sender){
   if(!trusted(sender))throw new Error('Only the extension dashboard can perform this action');
   const state=await read();
   switch(message.type){
+    case 'OPEN_DASHBOARD':await openDashboard(message.mode);return {ok:true};
+    case 'SAVE_MANUAL':{const id=message.id||'manual:'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2,10);if(message.id&&state.items[id]?.source!=='manual')throw Error('Manual assignment not found.');T.createManual(state,message,id);await save(state);return {ok:true,id};}
+    case 'DELETE_MANUAL':case 'RESTORE_MANUAL':{const item=state.items[message.id];if(item?.source!=='manual')throw Error('Manual assignment not found.');item.deleted=message.type==='DELETE_MANUAL';await save(state);return {ok:true};}
+    case 'MERGE_TASKS':{const id=T.mergeTasks(state,[message.id,message.otherId],message.primaryId);await save(state);return {ok:true,id};}
+    case 'SEPARATE_TASK':T.separate(state,message.id);await save(state);return {ok:true};
+    case 'SET_PRIMARY':{const group=state.groups?.[message.id];if(!group||!group.members.includes(message.primaryId)||!state.items[message.primaryId]||state.items[message.primaryId].deleted)throw Error('Choose one of this task’s sources.');group.primaryId=message.primaryId;await save(state);return {ok:true};}
     case 'GET_STATE':return {state,pearsonEnabled:await pearsonEnabled()};
-    case 'OPEN_ASSIGNMENT':{const item=state.items[message.id];if(!item)throw new Error('Assignment not found.');await openAssignment(item,state);return {ok:true};}
+    case 'OPEN_ASSIGNMENT':{const item=T.taskItem(state,message.id);if(!item)throw new Error('Assignment not found.');await openAssignment(item,state);return {ok:true};}
     case 'ENABLE_PEARSON':if(!await pearsonEnabled())throw new Error('Allow MyLab access first.');await configurePearson();return {ok:true};
     case 'SYNC':{
       if(state.job?.running)return {ok:true};if(state.settings.collecting===false)throw new Error('Enable collection in Settings.');
@@ -273,10 +280,10 @@ async function dispatch(message,sender){
       await save(state);rescanOpenTabs().catch(()=>{});return {ok:true};
     }
     case 'SET_ITEM':{
-      const item=state.items[message.id];if(!item)throw new Error('Assignment not found');
+      const item=T.record(state,message.id),original=T.taskItem(state,message.id,false);if(!item||!original)throw new Error('Assignment not found');
       if(['done','todo',''].includes(message.completionOverride)){item.completionOverride=message.completionOverride;item.completionUpdatedAt=Date.now();}
       if(message.resetDue===true){item.dueOverride=null;item.dueOverrideUpdatedAt=Date.now();}
-      else if(message.date!==undefined){item.dueOverride=C.manualDue(C.clean(message.date,10),C.clean(message.time,5),state.settings.zone);item.dueOverrideUpdatedAt=Date.now();item.overrideSourceDue={dueAt:item.dueAt,dueDate:item.dueDate};}
+      else if(message.date!==undefined){item.dueOverride=C.manualDue(C.clean(message.date,10),C.clean(message.time,5),state.settings.zone);item.dueOverrideUpdatedAt=Date.now();item.overrideSourceDue={dueAt:original.dueAt,dueDate:original.dueDate};}
       await save(state);return {ok:true};
     }
     case 'SET_SETTINGS':{
@@ -285,11 +292,13 @@ async function dispatch(message,sender){
       state.settings={zone:settings.zone,leadHours:Number(settings.leadHours),reminders:!!settings.reminders,collecting:settings.collecting??state.settings.collecting};
       if(typeof state.settings.collecting!=='boolean')throw new Error('Invalid collection setting');
       if(!state.settings.collecting&&state.job?.running){await releaseCurrent(state);state.job.running=false;await save(state);}
+      const groupBaselines=Object.values(state.groups||{}).filter(group=>group.overrideSourceDue&&C.sameDeadline(group.overrideSourceDue,T.taskItem(state,group.id,false)));
       for(const item of Object.values(state.items)){
         const baselineMatches=item.overrideSourceDue&&C.sameDeadline(item.overrideSourceDue,item);
         Object.assign(item,C.parseDue(item.dueRaw,state.settings.zone));
         if(baselineMatches)item.overrideSourceDue={dueAt:item.dueAt,dueDate:item.dueDate};
       }
+      for(const group of groupBaselines){const original=T.taskItem(state,group.id,false);if(original)group.overrideSourceDue={dueAt:original.dueAt,dueDate:original.dueDate};}
       await save(C.migrateState(state));await ensureAlarm();if(state.settings.collecting)rescanOpenTabs().catch(()=>{});return {ok:true};
     }
     case 'CLEAR':{await releaseCurrent(state);const empty=C.emptyState();empty.settings.collecting=false;await save(empty);return {ok:true};}
@@ -322,15 +331,15 @@ chrome.alarms.onAlarm.addListener(alarm=>{
     }
     for(const [id,opening] of Object.entries(state.opening||{}))if(Date.now()>opening.expires)delete state.opening[id];
     for(const item of C.dueReminders(state).slice(0,5)){
-      await chrome.notifications.create(`due:${item.id}`,{type:'basic',iconUrl:'icons/128.png',title:`Due soon · ${item.course}`,message:`${item.title}\n${new Date(item.dueAt).toLocaleString('en-US',{timeZone:state.settings.zone})}`});state.items[item.id].remindedFor=item.dueAt;
+      await chrome.notifications.create(`due:${item.id}`,{type:'basic',iconUrl:'icons/128.png',title:`Due soon · ${item.course}`,message:`${item.title}\n${new Date(item.dueAt).toLocaleString('en-US',{timeZone:state.settings.zone})}`});T.record(state,item.id).remindedFor=item.dueAt;
     }
     await save(state);
   }).catch(console.error);
 });
-chrome.notifications.onClicked.addListener(id=>locked(async()=>{const item=(await read()).items[id.slice(4)];if(id.startsWith('due:')&&item&&C.allowedURL(item.url)){await openAssignment(item);return;}await openDashboard();}));
+chrome.notifications.onClicked.addListener(id=>locked(async()=>{const item=T.taskItem(await read(),id.slice(4));if(id.startsWith('due:')&&item&&C.assignmentOpenURL(item)){await openAssignment(item);return;}await openDashboard();}));
 
 async function openAssignment(item,state){
-  const url=C.assignmentOpenURL(item);if(!C.allowedURL(url))throw new Error('No valid source link.');
+  const url=C.assignmentOpenURL(item);if(!(item.source==='manual'?!!T.manualURL(url):C.allowedURL(url)))throw new Error('No source link was added for this assignment.');
   const tab=await chrome.tabs.create({url,active:true});
   if(item.source==='brightspace'&&url!==C.courseListURL(item)){
     state ||= await read();state.opening ||= {};state.opening[tab.id]={url,fallback:C.courseListURL(item),expires:Date.now()+120000};await save(state);

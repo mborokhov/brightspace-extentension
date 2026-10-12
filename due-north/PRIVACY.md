@@ -1,10 +1,12 @@
 # Due North privacy information
 
-Version 0.4.0. Local browser storage only; no developer server, analytics, advertising, remote code, or cloud-synced storage.
+Version 0.5.0. Local browser storage only; no developer server, analytics, advertising, remote code, or cloud-synced storage.
 
 ## Stored information
 
-Assignment titles, course names/IDs/semester labels, supported source/page URLs, due dates and original deadline text, submission state, sync timestamps/diagnostics, local completion and deadline overrides, course choices, reminder markers, and settings are saved in `chrome.storage.local`. Content scripts cannot directly read this store.
+Assignment titles, course names/IDs/semester labels, supported source/page URLs, due dates and original deadline text, submission state, sync timestamps/diagnostics, local completion and deadline overrides, course choices, manually entered tasks/links, reversible merge membership and source choices, deleted manual task markers, reminder markers, and settings are saved in `chrome.storage.local`. Content scripts cannot directly read this store.
+
+Manual HTTPS links are stored as entered and opened only when you click them; they are never crawled by sync. Avoid putting credentials or authentication tokens in a manual link. Merging retains the separate source records locally; it does not alter school data.
 
 The extension does not collect passwords, cookie values, submitted answers, full assignment descriptions, account email addresses, or unrelated browsing history. Displayed grades are inspected only to recognize completion; numerical scores are not saved. No private API endpoints are fetched. Unneeded URL query parameters and fragments are removed before storage. Course, assignment, and Brightspace group parameters are retained for working links.
 

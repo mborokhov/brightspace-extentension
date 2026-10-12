@@ -1,9 +1,9 @@
-# Validation record — v0.4.0
+# Validation record — v0.5.0
 
 ## Verified
 
-- **71 Node tests**: URL boundaries; safe page routes; timezone/DST/date parsing; stable IDs; local completion and deadline preservation; reminders and calendar export; current-semester migration and rollover; week counts across midnight; serialized writes; sender validation; sync queue restrictions/recovery; sign-in handling; user-tab preservation; optional Pearson registration; embedded-frame course association and parent-page waiting; collection timing and mutation handling.
-- **26 browser DOM fixtures**: release/due/late date selection including the supplied Gradescope timeline; Brightspace quiz names, inline due dates and populated Evaluation Status; Not Submitted assignments with JavaScript links; unreadable dates; course term sections; hidden rows, shadow roots and duplicates; MyLab due/status/progress columns, plain names, completion icons and stable IDs.
+- **90 Node tests**: URL boundaries; safe page routes; timezone/DST/date parsing; stable IDs; local completion and deadline preservation; reminders and calendar export; current-semester migration and rollover; week counts across midnight; serialized writes; sender validation; sync queue restrictions/recovery; sign-in handling; user-tab preservation; optional Pearson registration; embedded-frame course association and parent-page waiting; collection timing and mutation handling.
+- **27 browser DOM fixtures**: release/due/late date selection including the supplied Gradescope timeline; Brightspace quiz names, inline due dates and populated Evaluation Status; Not Submitted assignments with JavaScript links; unreadable dates; course term sections; hidden rows, shadow roots and duplicates; MyLab due/status/progress columns, plain names, completion icons and stable IDs.
 - **Static checks**: JavaScript syntax, manifest/assets, no inline scripts, scoped host access. Git whitespace check passes.
 - **Interactive sample dashboard**: two navigation views; deadline editing updates list/chart/calendar; restore source date; completion and Completed filter; search; month navigation; current-course dialog excludes older courses; invalid timezone rejection; first-install empty state. Overview and Calendar visually inspected; no console errors observed during these checks.
 
@@ -32,6 +32,16 @@ Screenshot-derived fixtures cover MyLab’s Due-first table with `09/06/26 11:59
 
 The available browser has no signed-in school tabs. Real Chrome/Edge offscreen lifecycle, session-cookie behavior, and live Brightspace/Gradescope/Pearson responses still need installed-extension verification. Background reads can legitimately fall back to the one-tab renderer.
 
+## v0.5.0 regression checks
+
+- Manual tasks: timed/date-only/undated, current courses or Personal, safe optional links, edit/completion persistence, soft deletion/restore, semester rollover, export and reminder behavior.
+- Cross-platform groups: direct native references only, ambiguity protection, retained source links, one chart/calendar/export entry, chosen deadline, conservative source completion, local overrides, reminder deduplication, stale-primary protection, inactive-course filtering, persistence across captures and worker restart, and reversible separation that prevents automatic remerging.
+- Popup worker access and privileged sender boundaries; Add activates an existing dashboard with an editor hash. No additional site permissions.
+- Browser interactions: add/edit a date-only manual task; delete and Undo; merge, choose a source, and separate; edit a timed manual task to date-only and reopen its full editor; Calendar; popup completion removes the task and fills its place; empty dashboard and Add hash shortcut. No console errors observed. Exactly two navigation views remain. Dashboard, Calendar, dialogs, and popup were visually inspected; synthetic screenshots are in the release directory.
+- The additional DOM fixture verifies Brightspace cross-platform links are retained with sensitive query parameters removed. All 27 fixtures passed in a real DOMParser environment.
+
+These checks use synthetic data and mocked extension APIs. The toolbar's actual Chrome/Edge popup lifecycle, notification delivery, and signed-in integrations remain installed-extension acceptance checks. Browser viewport overrides did not apply in this preview environment, so narrow-window behavior has not been visually verified.
+
 ## Reproduce
 
 ```sh
@@ -51,6 +61,7 @@ Open `http://127.0.0.1:4173/tests/browser.html` for the DOM fixtures. The sample
 5. Enable MyLab Math's optional access and reload Homework and Tests. Confirm the course if needed. Compare titles, due dates and status with the portal/embedded table. Unsupported layouts need a redacted fixture and adapter update.
 6. Check paginated lists, sign-in expiry and sync details. Try reminders while the browser is running; browser/OS settings may suppress notifications.
 7. Run a sync across several courses. Background-readable pages should create no tabs; rendered pages should reuse one inactive tab. Activate or close that tab and confirm it is not replaced. Stop during a slow read and verify no late assignments arrive from that run. Sign out of one source, sync, and confirm its remaining pages are skipped with a sign-in message.
-8. Reload the extension; local choices should persist. A fresh browser profile starts empty. The source ZIP contains no user storage.
+8. Click the toolbar icon: check an assignment complete, use Sync/Stop, and use Add. Confirm the existing planner activates and the editor opens. Add a task, edit it, and delete/Undo it. Merge copies from Details; choose the source, edit its deadline, sync, reload, then separate. Compare the chart, calendar, popup and export: a merged task should count once.
+9. Reload the extension; local choices should persist. A fresh browser profile starts empty. The source ZIP contains no user storage.
 
 Do not add credentials, account pages, submitted work, browser profiles, or private calendar exports to test fixtures or the shared project.

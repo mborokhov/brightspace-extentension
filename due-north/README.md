@@ -2,7 +2,7 @@
 
 A shareable Chrome/Edge extension for Purdue Brightspace, Gradescope, and MyLab Math. No API key, server, or build step. Each person uses their own school login and browser storage.
 
-**Version 0.4.0 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
+**Version 0.5.0 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
 
 ## Install or update
 
@@ -10,7 +10,7 @@ A shareable Chrome/Edge extension for Purdue Brightspace, Gradescope, and MyLab 
 2. Open `chrome://extensions` or `edge://extensions` and enable **Developer mode**.
 3. Choose **Load unpacked**, then select `due-north/extension` (or `extension` inside the project ZIP).
 4. Select the **folder**, not `manifest.json`. The folder chooser may show only the `icons` subfolder; this is normal.
-5. Pin Due North and open it. Reload any school tabs already open.
+5. Pin Due North. Clicking its toolbar icon opens the quick view; choose **Open planner** for the dashboard. Reload any school tabs already open.
 
 For an existing installation pointing at this folder, click **Reload** on its extension card. If you moved the source folder, load the new `extension` folder. Avoid leaving two copies enabled. Keep the source folder in place while using the extension.
 
@@ -32,6 +32,13 @@ Semester detection uses Spring (January–May), Summer (June–July), and Fall (
 
 ## Dashboard
 
+The Windows 95 theme uses a teal desktop, navy title bars, gray beveled controls, a taskbar, and an original pixel compass. It uses system fonts and local assets.
+
+- **Toolbar popup:** the next six incomplete deadlines, completion checkboxes, Sync/Stop, **Open planner**, and **Add**. Changes share the dashboard's local store. Add opens its assignment editor without opening school pages.
+- **Add assignment:** enter a name, choose a current course or Personal, and optionally add a date, time, and HTTPS link. Manual assignments appear in the list, chart, calendar, popup, reminders, and export. Details offers Edit assignment and Delete assignment with a 15-second Undo. They stay scoped to their semester and survive school syncs.
+- **Merge copies:** Details → Merge with lets you combine copies of one assignment and choose which source supplies its name, deadline, and default link. Both source links remain available. Custom dates and completion choices survive sync. Separate sources reverses the merge and preserves local edits.
+- **Automatic merging:** a Brightspace row directly linking to the exact native Gradescope/MyLab assignment can combine their existing records. Each platform must have one unambiguous target; names and dates alone never auto-merge. A combined task counts once in the chart, calendar, popup, reminders, and export. It stays pending until every source is complete, unless you set a local completion override. Separating sources prevents them from automatically merging again.
+
 - **Overview:** a Monday–Sunday chart of incomplete assignments, week navigation, and a searchable assignment list. Click a bar to filter by day.
 - **Calendar:** month navigation and assignments on their due dates. Click an assignment to edit its deadline.
 - **Edit date:** sets a local deadline, optionally without a time. Later syncs preserve it. If the source deadline changes after your edit, the row shows both dates. **Use source date** restores the latest source deadline. Edits affect the chart, calendar, reminders, and export; they never modify the school site.
@@ -51,8 +58,8 @@ Send the project ZIP or repository link. Friends load their own `extension` fold
 
 - Time zone defaults to `America/New_York`. Match the zone shown on your course pages. Explicit timestamp offsets take precedence. Local edits preserve their selected instant if you later change the display time zone.
 - Missing times remain date-only; missing years are inferred and cannot trigger reminders until corrected. Unreadable deadlines remain undated and can be edited.
-- Reminders are opt-in, checked about once per minute while the browser runs. Completed, past-due, undated/date-only, inferred-year, and more-than-seven-days-stale records are excluded. OS settings can suppress notifications.
-- Partial scans do not delete assignments that disappeared from the page. Cross-platform duplicates remain separate; mark an unwanted duplicate complete locally.
+- Reminders are opt-in, checked about once per minute while the browser runs. Completed, past-due, undated/date-only, inferred-year, and more-than-seven-days-stale school records are excluded. Manual assignments do not need a recent school sync. OS settings can suppress notifications.
+- Partial scans do not delete assignments that disappeared from the page. Cross-platform copies without a direct assignment reference require a manual merge. Links hidden inside unloaded descriptions cannot be used for automatic matching.
 - Only loaded list rows are read. Syllabus PDFs, announcements, closed shadow roots, and unsupported/custom layouts are outside coverage. MyLab Math support currently targets due-first tables, short-year dates such as `09/06/26`, embedded lists, and Course Home date-badge cards on the supported hosts; live verification of your signed-in layout remains necessary.
 - Use one school account per browser profile. Before switching accounts, clear local data in Settings. Clearing pauses collection; enable it again after signing into the new account.
 
@@ -67,6 +74,8 @@ npm run preview
 ```
 
 Dashboard preview: `http://127.0.0.1:4173/extension/dashboard.html`
+
+Toolbar popup preview: `http://127.0.0.1:4173/extension/popup.html`
 
 Parser fixtures: `http://127.0.0.1:4173/tests/browser.html`
 

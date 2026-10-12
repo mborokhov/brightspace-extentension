@@ -278,3 +278,40 @@ test('a partial borrowed page falls back without navigating the user tab',async(
  const job=h.store.state.job;await h.message({type:'CAPTURE',snapshot:snapshot({quality:{partial:true},requestId:job.pageToken})},sender);
  assert.equal(h.created.length,1);assert.equal(h.store.state.job.tabOwned,true);assert.equal(h.tabs.get(500).url,url);assert.ok(!h.updates.some(update=>update.id===500));
 });
+
+
+test('popup can create, complete, edit, delete and restore manual tasks through serialized worker storage',async()=>{
+ const h=harness(),popup={...h.admin,url:'chrome-extension://test-extension/popup.html'};
+ const result=await h.message({type:'SAVE_MANUAL',title:'Study group',date:'2026-10-16',time:'18:00'},popup);assert.equal(result.ok,true);
+ const id=result.id;await h.message({type:'SET_ITEM',id,completionOverride:'done'},popup);await h.message({type:'SAVE_MANUAL',id,title:'Study group revised',date:'2026-10-17'},popup);
+ let s=(await h.settle()).state;assert.equal(s.items[id].dueDate,'2026-10-17');assert.equal(s.items[id].completionOverride,'done');
+ await h.message({type:'DELETE_MANUAL',id},popup);assert.equal(h.context.DNTasks.taskItems((await h.settle()).state).length,0);
+ await h.message({type:'RESTORE_MANUAL',id},popup);const restarted=harness(h.store);assert.equal(restarted.context.DNTasks.taskItems((await restarted.settle()).state).length,1);
+ assert.match((await h.message({type:'SAVE_MANUAL',title:'Injected'},sender)).error,/dashboard/);
+});
+test('worker stores automatic groups and preserves group edits, reminders and separation through captures',async()=>{
+ const h=harness(),s=snapshot();s.items[0].dueRaw=new Date(Date.now()+3600000).toISOString();await h.message({type:'CAPTURE',snapshot:s},sender);
+ const bsURL='https://purdue.brightspace.com/d2l/lms/dropbox/user/folders_list.d2l?ou=42';
+ const bs={source:'brightspace',pageURL:bsURL,title:'Assignments',course:{id:'42',title:'MA 161',term},items:[{title:'HW 1',url:'https://purdue.brightspace.com/d2l/lms/dropbox/user/folder_submit_files.d2l?ou=42&db=5',dueRaw:s.items[0].dueRaw,status:'not-submitted',relatedURLs:[s.items[0].url,'https://evil.test/assignments/99']}],links:[],settled:true};
+ const bsSender={id:'test-extension',url:bsURL,tab:{id:501}};await h.message({type:'CAPTURE',snapshot:bs},bsSender);
+ let state=(await h.settle()).state,groups=Object.values(state.groups);assert.equal(groups.length,1);const id=groups[0].id;
+ assert.equal(h.context.DNTasks.taskItems(state).length,1);assert.equal(Object.values(state.items).find(i=>i.source==='brightspace').relatedURLs.length,1);
+ await h.message({type:'SET_SETTINGS',settings:{zone:'America/New_York',leadHours:24,reminders:true}});h.events.alarm({name:'maintenance'});await h.settle();assert.equal(h.notifications.length,1);
+ await h.message({type:'CAPTURE',snapshot:s},sender);await h.message({type:'CAPTURE',snapshot:bs},bsSender);h.events.alarm({name:'maintenance'});await h.settle();assert.equal(h.notifications.length,1);
+ await h.message({type:'SET_ITEM',id,date:'2026-10-18',time:'18:00',completionOverride:'done'});const primary=groups[0].primaryId;
+ assert.match((await h.message({type:'SET_PRIMARY',id,primaryId:'missing'})).error,/source/);assert.equal((await h.message({type:'SET_PRIMARY',id,primaryId:primary})).ok,true);
+ const restarted=harness(h.store);state=(await restarted.settle()).state;assert.equal(restarted.context.DNTasks.taskItem(state,id).completionOverride,'done');
+ await restarted.message({type:'SEPARATE_TASK',id});await restarted.message({type:'CAPTURE',snapshot:s},sender);state=(await restarted.settle()).state;
+ assert.equal(Object.keys(state.groups).length,0);assert.equal(restarted.context.DNTasks.taskItems(state).length,2);assert.ok(Object.values(state.items).every(i=>i.completionOverride==='done'));
+});
+test('merged custom date baseline survives timezone display changes without a false source conflict',async()=>{
+ const h=harness();await h.message({type:'CAPTURE',snapshot:snapshot()},sender);const raw=Object.keys(h.store.state.items)[0];
+ const manual=await h.message({type:'SAVE_MANUAL',title:'Copy',date:'2026-09-20'});const merged=await h.message({type:'MERGE_TASKS',id:raw,otherId:manual.id,primaryId:raw});assert.equal(merged.ok,true);
+ await h.message({type:'SET_ITEM',id:merged.id,date:'2026-09-25',time:'18:00'});await h.message({type:'SET_SETTINGS',settings:{zone:'America/Los_Angeles',leadHours:24}});
+ const state=(await h.settle()).state,task=h.context.DNTasks.taskItem(state,merged.id);assert.equal(task.dueAt,'2026-09-25T22:00:00.000Z');assert.equal(C.sameDeadline(task.overrideSourceDue,h.context.DNTasks.taskItem(state,merged.id,false)),true);
+});
+test('popup Add reuses existing dashboard with an editor hash and never opens another school page',async()=>{
+ const h=harness();h.tabs.set(9,{id:9,url:'chrome-extension://test-extension/dashboard.html'});
+ await h.message({type:'OPEN_DASHBOARD',mode:'add'},{...h.admin,url:'chrome-extension://test-extension/popup.html'});
+ assert.equal(h.created.length,0);assert.equal(h.updates[0].id,9);assert.match(h.updates[0].change.url,/#add=/);assert.equal(h.updates[0].change.active,true);
+});

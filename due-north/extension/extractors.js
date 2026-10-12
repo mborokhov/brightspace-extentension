@@ -123,7 +123,7 @@
       const evaluation=evaluationIndex>=0?cell[evaluationIndex]:null;
       const filled=!!evaluation&&(!!text(evaluation)||!!evaluation.querySelector('img,svg,[aria-label],[title]'));
       const status=quizPage&&filled?'submitted':statusOf(statusIndex>=0?text(cell[statusIndex]):/not submitted/i.test(text(row))?'Not Submitted':text(row.querySelector('.d2l-assignment-status,[data-status]')));
-      items.push(baseItem('brightspace',{...course,id:course.id||C.courseId(link)},link,url,title,deadline,zone,now,{status,type:quizPage?'quiz':'assignment',nativeId:row.getAttribute('data-assignment-id')||''}));
+      items.push(baseItem('brightspace',{...course,id:course.id||C.courseId(link)},link,url,title,deadline,zone,now,{status,relatedURLs:[...row.querySelectorAll('a[href]')].map(a=>C.canonicalURL(a.getAttribute('href'),url)).filter(value=>value&&C.sourceFor(value)!=='brightspace').slice(0,6),type:quizPage?'quiz':'assignment',nativeId:row.getAttribute('data-assignment-id')||''}));
     }
     return items;
   }

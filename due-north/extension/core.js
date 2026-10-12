@@ -57,11 +57,12 @@
   const isEventAlias = item => item.source==='brightspace' && (item.eventAlias===true || /^view\s+event\s*[-:–—]/i.test(clean(item.title)));
   function assignmentTitle(item) { return isEventAlias(item) ? clean(item.title).replace(/^view\s+event\s*[-:–—]\s*/i,'').replace(/\s*[-:–—]\s*due\s*$/i,'').trim() : clean(item.title,250); }
   function nativeAssignmentId(item) {
-    if(isEventAlias(item))return '';
+    if(item.source==='manual'||isEventAlias(item))return '';
     const u=new URL(item.url);
     return item.nativeId || u.pathname.match(/\/assignments\/(\d+)/)?.[1] || [...u.searchParams].find(([key]) => /^(db|qi|homeworkid|assignmentid|testid)$/i.test(key))?.[1] || '';
   }
   function assignmentId(item) {
+    if(item.source==='manual')return item.id;
     const u = new URL(item.url), course = item.courseId || courseId(item.pageURL || item.url);
     const id = nativeAssignmentId(item);
     const type = item.type === 'quiz' || /quizz/i.test(u.pathname) ? 'quiz' : 'assignment';
@@ -76,6 +77,7 @@
   }
   function assignmentOpenURL(item) {
     const url=canonicalURL(item.url);
+    if(item.source==='manual')return root.DNTasks?.manualURL(item.url)||'';
     if(item.source!=='brightspace')return url||canonicalURL(item.pageURL);
     if(item.linkVersion>=2&&url){
       const u=new URL(url);
@@ -181,11 +183,12 @@
     }
     state.items=deduplicateItems(state.items);
     for(const item of Object.values(state.items))if(item.source==='pearson'&&!item.dueAt&&!item.dueDate&&item.dueRaw)Object.assign(item,parseDue(item.dueRaw,state.settings.zone,now));
+    root.DNTasks?.reconcileGroups(state);
     return state;
   }
   function isCourseActive(state,key) { const c = state.courses[key]; return !!(c?.enabled && !c.inactive && c.term === state.activeTerm); }
   function effective(item) { return item.dueOverride ? {...item,...item.dueOverride,dateNote:'Edited by you'} : item; }
-  function activeItems(state) { return Object.values(state.items).filter(i => isCourseActive(state,i.courseKey || courseKey(i.source,i.courseId))).map(effective); }
+  function activeItems(state) { if(root.DNTasks)return root.DNTasks.taskItems(state);return Object.values(state.items).filter(i => isCourseActive(state,i.courseKey || courseKey(i.source,i.courseId))).map(effective); }
   function manualDue(date, time, zone) {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error('Choose a valid date.');
     const parsed = parseDue(`${date}${time ? ' '+time : ''}`,zone);
@@ -221,6 +224,7 @@
     for(const [key,original] of Object.entries(items)){
       const item={...original,eventAlias:isEventAlias(original),title:assignmentTitle(original)};
       next[key]=item;
+      if(item.source==='manual')continue;
       if(nativeAssignmentId(item)){
         const identity=assignmentId(item),prior=nativeKeys.get(identity);
         if(prior){
@@ -230,6 +234,7 @@
       }
     }
     for(const [key,item] of Object.entries(next)){
+      if(item.source==='manual')continue;
       const course=item.courseId||courseId(item.pageURL||item.url);
       if(!course)continue;
       const group=JSON.stringify([item.source,course,item.title.normalize('NFKC').toLowerCase()]);
@@ -263,7 +268,7 @@
   }
   function dueReminders(state, now = Date.now()) {
     if (!state.settings.reminders) return [];
-    return activeItems(state).filter(i => !isDone(i) && i.dueAt && !/inferred/i.test(i.dateNote) && now - i.lastSeen < 7 * 86400000 && Date.parse(i.dueAt) > now && Date.parse(i.dueAt) - now <= state.settings.leadHours * 3600000 && i.remindedFor !== i.dueAt);
+    return activeItems(state).filter(i => !isDone(i) && i.dueAt && !/inferred/i.test(i.dateNote) && (i.source==='manual'||now - i.lastSeen < 7 * 86400000) && Date.parse(i.dueAt) > now && Date.parse(i.dueAt) - now <= state.settings.leadHours * 3600000 && i.remindedFor !== i.dueAt);
   }
   function escapeICS(text) { return String(text || '').replace(/\\/g, '\\\\').replace(/\r?\n/g, '\\n').replace(/;/g,'\\;').replace(/,/g,'\\,'); }
   function foldICS(line) {
@@ -278,7 +283,7 @@
       lines.push('BEGIN:VEVENT', `UID:${item.id}@due-north.local`, `DTSTAMP:${stamp}`);
       if (item.dueAt) lines.push(`DTSTART:${item.dueAt.replace(/[-:]/g,'').replace(/\.\d{3}/,'')}`);
       else lines.push(`DTSTART;VALUE=DATE:${item.dueDate.replace(/-/g,'')}`);
-      lines.push(`SUMMARY:${escapeICS(`${item.course}: ${item.title}`)}`, `DESCRIPTION:${escapeICS(`Deadline snapshot from ${item.source}. ${item.dateNote || ''}\n${item.dueRaw}\nCheck the source for updates.\n${assignmentOpenURL(item)}`)}`, `URL:${assignmentOpenURL(item)}`, 'END:VEVENT');
+      lines.push(`SUMMARY:${escapeICS(`${item.course}: ${item.title}`)}`, `DESCRIPTION:${escapeICS(`Deadline snapshot from ${item.source}. ${item.dateNote || ''}\n${item.dueRaw}\nCheck the source for updates.\n${assignmentOpenURL(item)}`)}`, ...(assignmentOpenURL(item)?[`URL:${assignmentOpenURL(item)}`]:[]), 'END:VEVENT');
     }
     lines.push('END:VCALENDAR'); return lines.map(foldICS).join('\r\n') + '\r\n';
   }

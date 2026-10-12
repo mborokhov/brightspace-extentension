@@ -121,6 +121,11 @@ test('MyLab td headers are excluded from assignment row counts',()=>{
 test('Brightspace server error pages never count as empty assignment lists',()=>{
  const s=extract('<h1>Internal Server Error</h1>','https://purdue.brightspace.com/d2l/error/500');equal(s.pageError,true);equal(s.quality.explicitEmpty,false);equal(s.items.length,0);
 });
+
+test('Brightspace preserves direct cross-platform assignment references without treating course links as matches',()=>{
+ const s=extract('<table><tr><td><a href="/d2l/lms/dropbox/user/folder_submit_files.d2l?db=5&ou=42">Homework 5</a><div>Due on September 20, 2026 11:59 PM</div><a href="https://www.gradescope.com/courses/42/assignments/99/submissions/new?token=secret">Gradescope submission</a><a href="https://evil.test/">External</a></td><td>Not Submitted</td></tr></table>',bs);
+ equal(s.items.length,1);equal(s.items[0].relatedURLs.length,1);equal(s.items[0].relatedURLs[0],'https://www.gradescope.com/courses/42/assignments/99/submissions/new');
+});
 const passed=results.filter(r=>r.pass).length;
 document.getElementById('test-summary').textContent=`${passed}/${results.length} passed${passed===results.length?' — all parser checks passed.':' — failures need attention.'}`;
 document.title=`${passed===results.length?'PASS':'FAIL'} · Due North DOM tests`;

@@ -1,21 +1,18 @@
 'use strict';
-const C=DNCore,$=id=>document.getElementById(id),extension=location.protocol==='chrome-extension:'&&!!globalThis.chrome?.runtime?.id;
-let state=C.emptyState(),view='overview',selectedDay='',week=C.weekStart(Date.now(),state.settings.zone),month=C.dateKey(Date.now(),state.settings.zone).slice(0,7),editingId='',pearsonReady=false,toastTimer;
-const sourceNames={brightspace:'Brightspace',gradescope:'Gradescope',pearson:'MyLab Math'};
+const C=DNCore,T=DNTasks,$=id=>document.getElementById(id),extension=location.protocol==='chrome-extension:'&&!!globalThis.chrome?.runtime?.id;
+let state=C.emptyState(),view='overview',selectedDay='',week=C.weekStart(Date.now(),state.settings.zone),month=C.dateKey(Date.now(),state.settings.zone).slice(0,7),editingId='',detailsId='',manualId='',pearsonReady=false,toastTimer;
+const sourceNames=T.SOURCES,schoolSources=['brightspace','gradescope','pearson'];
 const el=(tag,cls,value)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(value!==undefined)node.textContent=value;return node;};
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').hidden=true;},5500);}
-function demoState(){
-  const s=C.emptyState(),today=C.dateKey(Date.now(),s.settings.zone),term=s.activeTerm;
-  const courses=[['brightspace','101','MA 16100'],['gradescope','102','CHM 11500'],['pearson','103','MA 16200']];
-  for(const [source,id,title]of courses){const key=C.courseKey(source,id);s.courses[key]={key,source,id,title,term,enabled:true,url:source==='brightspace'?`https://purdue.brightspace.com/d2l/home/${id}`:source==='gradescope'?`https://www.gradescope.com/courses/${id}`:`https://mylabmastering.pearson.com/courses/${id}/menu/homework`};}
-  const examples=[['HW3',0,0,'not-submitted'],['Lab Report 4',1,1,'not-submitted'],['Written Homework 11',0,2,'not-submitted'],['Section 3.4 Homework',2,0,'not-submitted'],['Quiz 2',0,-1,'submitted'],['Lab preparation',1,3,'not-submitted'],['Problem set 5',2,4,'not-submitted'],['Project proposal',1,null,'not-submitted']];
-  examples.forEach(([title,index,offset,status],i)=>{const [source,courseId,course]=courses[index],courseKey=C.courseKey(source,courseId),date=offset===null?null:C.shiftDay(today,offset),dueAt=date?C.manualDue(date,'23:59',s.settings.zone).dueAt:null;const url=source==='gradescope'?`https://www.gradescope.com/courses/${courseId}/assignments/${i}`:s.courses[courseKey].url;s.items[`sample-${i}`]={id:`sample-${i}`,title,course,courseId,courseKey,term,source,status,url,dueAt,dueDate:null,dueRaw:dueAt||'',dateNote:'',lastSeen:Date.now()};});
-  s.courses['brightspace:old']={key:'brightspace:old',source:'brightspace',id:'old',title:'Previous course',term:`Fall ${new Date().getFullYear()-1}`,enabled:false};
-  for(const source of Object.keys(sourceNames))s.sources[source]={lastSuccess:Date.now(),outcome:'updated',message:'Sample data'};return s;
-}
+function demoState(){return DNDemo.create();}
 async function send(message){
   if(!extension){
-    if(message.type==='SET_ITEM'){const item=state.items[message.id];if(message.completionOverride!==undefined)item.completionOverride=message.completionOverride;if(message.resetDue)item.dueOverride=null;else if(message.date!==undefined){item.dueOverride=C.manualDue(message.date,message.time,state.settings.zone);item.overrideSourceDue={dueAt:item.dueAt,dueDate:item.dueDate};}}
+    if(message.type==='SET_ITEM'){const item=T.record(state,message.id),original=T.taskItem(state,message.id,false);if(message.completionOverride!==undefined){item.completionOverride=message.completionOverride;item.completionUpdatedAt=Date.now();}if(message.resetDue){item.dueOverride=null;item.dueOverrideUpdatedAt=Date.now();}else if(message.date!==undefined){item.dueOverride=C.manualDue(message.date,message.time,state.settings.zone);item.dueOverrideUpdatedAt=Date.now();item.overrideSourceDue={dueAt:original.dueAt,dueDate:original.dueDate};}}
+    if(message.type==='SAVE_MANUAL'){const id=message.id||'manual:preview-'+Date.now();T.createManual(state,message,id);return {ok:true,id};}
+    if(message.type==='DELETE_MANUAL'||message.type==='RESTORE_MANUAL')state.items[message.id].deleted=message.type==='DELETE_MANUAL';
+    if(message.type==='MERGE_TASKS')return {ok:true,id:T.mergeTasks(state,[message.id,message.otherId],message.primaryId)};
+    if(message.type==='SEPARATE_TASK')T.separate(state,message.id);
+    if(message.type==='SET_PRIMARY')state.groups[message.id].primaryId=message.primaryId;
     if(message.type==='SET_COURSE'){const c=state.courses[message.key];c.enabled=message.enabled;c.term=state.activeTerm;c.userSelected=message.enabled;}
     if(message.type==='SET_SETTINGS')state.settings=message.settings;
     if(message.type==='CLEAR'){state=C.emptyState();state.settings.collecting=false;}
@@ -32,7 +29,7 @@ function dateLabel(item){const day=dayOf(item);return day?dayLabel(day):'Set dat
 function timeLabel(item){return item.dueAt?new Intl.DateTimeFormat('en-US',{timeZone:state.settings.zone,hour:'numeric',minute:'2-digit'}).format(new Date(item.dueAt)):item.dueDate?'All day':'';}
 function deadlineText(item){return dayOf(item)?`${dateLabel(item)} ${timeLabel(item)}`.trim():'No deadline';}
 function relative(ms){if(!ms)return 'Not synced';const min=Math.max(0,Math.round((Date.now()-ms)/60000));return min<1?'Just synced':min<60?`${min}m ago`:min<1440?`${Math.floor(min/60)}h ago`:`${Math.floor(min/1440)}d ago`;}
-function baseItems(){const search=$('search').value.toLowerCase().trim(),course=$('course-filter').value;return C.activeItems(state).filter(i=>(!course||i.courseKey===course)&&(!search||`${i.title} ${i.course} ${sourceNames[i.source]}`.toLowerCase().includes(search)));}
+function baseItems(){const search=$('search').value.toLowerCase().trim(),course=$('course-filter').value;return C.activeItems(state).filter(i=>T.courseMatches(i,course)&&(!search||`${i.title} ${i.course} ${sourceNames[i.source]}`.toLowerCase().includes(search)));}
 function statusMatches(item){const filter=$('status-filter').value;return filter==='all'||(filter==='done'?C.isDone(item):!C.isDone(item));}
 function renderWeek(items){
   const data=C.weekCounts(items,week,state.settings.zone),today=C.dateKey(Date.now(),state.settings.zone),max=Math.max(4,Math.ceil(Math.max(...data.map(d=>d.count))/4)*4);
@@ -48,27 +45,31 @@ function renderCalendar(items){
   for(let w=0;w<weeks;w++){const row=el('div','calendar-week');row.setAttribute('role','row');for(let d=0;d<7;d++){
     const day=C.shiftDay(start,w*7+d),cell=el('div',`calendar-day${day.slice(0,7)!==month?' outside':''}${day===today?' today':''}${day===selectedDay?' selected':''}`);cell.setAttribute('role','gridcell');cell.setAttribute('aria-label',dayLabel(day,{weekday:'long',month:'long',day:'numeric'}));
     const number=el('button','day-number',Number(day.slice(-2)));number.setAttribute('aria-label',`Show assignments for ${day}`);number.addEventListener('click',()=>{selectedDay=selectedDay===day?'':day;render();});cell.append(number);
-    const list=items.filter(i=>statusMatches(i)&&dayOf(i)===day).sort((a,b)=>String(a.dueAt||'').localeCompare(b.dueAt||''));
+    const list=items.filter(i=>statusMatches(i)&&dayOf(i)===day).sort((a,b)=>T.compareTasks(a,b,state.settings.zone));
     for(const item of list.slice(0,3)){const event=el('button',`calendar-event ${item.source}${C.isDone(item)?' completed':''}`,item.title);event.title=`${item.title} · ${timeLabel(item)}`;event.setAttribute('aria-label',`Edit deadline for ${item.title}`);event.addEventListener('click',()=>openEditor(item.id));cell.append(event);}
     if(list.length>3){const more=el('button','calendar-more',`+${list.length-3} more`);more.addEventListener('click',()=>{selectedDay=day;render();});cell.append(more);}row.append(cell);
   }grid.append(row);}
 }
 function renderList(items){
-  const now=Date.now(),filtered=items.filter(i=>statusMatches(i)&&(!selectedDay||dayOf(i)===selectedDay)&&(view!=='calendar'||selectedDay||dayOf(i).slice(0,7)===month)).sort((a,b)=>(a.dueAt?Date.parse(a.dueAt):a.dueDate?Date.parse(a.dueDate):Infinity)-(b.dueAt?Date.parse(b.dueAt):b.dueDate?Date.parse(b.dueDate):Infinity)||a.title.localeCompare(b.title));
+  const now=Date.now(),filtered=items.filter(i=>statusMatches(i)&&(!selectedDay||dayOf(i)===selectedDay)&&(view!=='calendar'||selectedDay||dayOf(i).slice(0,7)===month)).sort((a,b)=>T.compareTasks(a,b,state.settings.zone));
   $('list-count').textContent=filtered.length;$('date-filter').hidden=!selectedDay;$('date-filter').textContent=selectedDay?`${dayLabel(selectedDay)} ×`:'';
   const body=$('assignment-rows');body.replaceChildren();
   for(const item of filtered){
     const done=C.isDone(item),past=!done&&item.dueAt&&Date.parse(item.dueAt)<now,row=el('tr',done?'completed':'');
     const checkCell=el('td'),check=el('input','completion');check.type='checkbox';check.checked=done;check.setAttribute('aria-label',`Mark ${item.title} ${done?'incomplete':'complete'}`);check.addEventListener('change',()=>act({type:'SET_ITEM',id:item.id,completionOverride:check.checked?'done':'todo'}));checkCell.append(check);row.append(checkCell);
-    const nameCell=el('td'),link=el(extension?'a':'span','assignment-link',item.title);if(extension){link.href=C.assignmentOpenURL(item);link.target='_blank';link.rel='noopener noreferrer';link.addEventListener('click',event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();act({type:'OPEN_ASSIGNMENT',id:item.id});});}nameCell.append(link);
-    const original=state.items[item.id],sourceChanged=item.dueOverride&&(original.overrideSourceDue?!C.sameDeadline(original.overrideSourceDue,original):original.changedAt>(original.dueOverrideUpdatedAt||0));
+    const nameCell=el('td'),hasLink=!!C.assignmentOpenURL(item),link=el(extension&&hasLink?'a':'button','assignment-link',item.title);
+    if(link.tagName==='A'){link.href=C.assignmentOpenURL(item);link.target='_blank';link.rel='noopener noreferrer';link.addEventListener('click',event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();act({type:'OPEN_ASSIGNMENT',id:item.id});});}
+    else{link.type='button';link.addEventListener('click',()=>openDetails(item.id));}nameCell.append(link);
+    const sources=el('div','source-links');
+    if(item.merged){for(const source of T.sourceLinks(state,item)){const badge=el(extension?'a':'span','source-link '+source.source,source.label);if(extension){badge.href=source.url;badge.target='_blank';badge.rel='noopener noreferrer';badge.addEventListener('click',event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();act({type:'OPEN_ASSIGNMENT',id:source.id});});}sources.append(badge);}nameCell.append(sources);}
+    const original=T.taskItem(state,item.id,false),sourceChanged=item.dueOverride&&(original.overrideSourceDue?!C.sameDeadline(original.overrideSourceDue,original):original.changedAt>(original.dueOverrideUpdatedAt||0));
     if(sourceChanged)nameCell.append(el('span','item-detail deadline-change',`Source: ${deadlineText(original)} · Your date: ${deadlineText(item)}`));
     else if(!item.dueOverride&&item.changedAt&&now-item.changedAt<7*86400000)nameCell.append(el('span','item-detail','Source deadline changed'));
     row.append(nameCell);
-    const course=el('td');const courseName=el(item.source==='brightspace'&&extension?'a':'span','course-name',item.course);if(courseName.tagName==='A'){courseName.href=C.courseListURL(item);courseName.target='_blank';courseName.rel='noopener noreferrer';courseName.title='Open the course assignment list';}course.append(courseName,el('span','source-name',sourceNames[item.source]));row.append(course);
+    const course=el('td');const courseName=el(item.source==='brightspace'&&extension?'a':'span','course-name',item.course);if(courseName.tagName==='A'){courseName.href=C.courseListURL(item);courseName.target='_blank';courseName.rel='noopener noreferrer';courseName.title='Open the course assignment list';}course.append(courseName,el('span','source-name',item.merged?'Merged assignment':sourceNames[item.source]));row.append(course);
     const dateCell=el('td'),date=el('div',`deadline${past?' past':''}`,dateLabel(item));date.title=`${item.dueRaw||'No date provided'}${item.dueOverride?' · Custom deadline':''}`;date.append(el('small','',`${timeLabel(item)}${item.dueOverride?' · Edited':''}`));dateCell.append(date);row.append(dateCell);
     const statusCell=el('td');let status=done?['done','Completed']:past?['past','Past due']:item.dueAt&&Date.parse(item.dueAt)-now<2*86400000?['soon','Due soon']:['','To do'];statusCell.append(el('span',`pill ${status[0]}`,status[1]));if(item.completionOverride){const reset=el('button','reset-status','Use source status');reset.addEventListener('click',()=>act({type:'SET_ITEM',id:item.id,completionOverride:''}));statusCell.append(reset);}row.append(statusCell);
-    const editCell=el('td'),edit=el('button','edit-button','Edit date');edit.setAttribute('aria-label',`Edit deadline for ${item.title}`);edit.addEventListener('click',()=>openEditor(item.id));editCell.append(edit);row.append(editCell);body.append(row);
+    const editCell=el('td'),edit=el('button','edit-button','Edit date');edit.setAttribute('aria-label',`Edit deadline for ${item.title}`);edit.addEventListener('click',()=>openEditor(item.id));const details=el('button','edit-button','Details');details.setAttribute('aria-label',`Details for ${item.title}`);details.addEventListener('click',()=>openDetails(item.id));editCell.append(edit,details);row.append(editCell);body.append(row);
   }
   const courseCount=Object.values(state.courses).filter(c=>C.isCourseActive(state,c.key)).length;
   $('empty-state').hidden=filtered.length>0;$('empty-courses').hidden=courseCount>0;
@@ -76,11 +77,11 @@ function renderList(items){
   $('empty-description').textContent=!courseCount?'Open your course lists, then select your current classes.':items.length?'Try another date or filter.':'Visit Assignments, Quizzes, or Homework and Tests, then sync.';
 }
 function render(){
-  state=C.migrateState(state);$('semester').textContent=state.activeTerm;$('today-label').textContent=new Intl.DateTimeFormat('en-US',{timeZone:state.settings.zone,weekday:'long',month:'long',day:'numeric'}).format(Date.now());
+  state=C.migrateState(state);$('desktop-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:state.settings.zone,hour:'numeric',minute:'2-digit'}).format(Date.now());document.querySelector('.titlebar-caption').textContent=state.activeTerm;$('semester').textContent=state.activeTerm;$('today-label').textContent=new Intl.DateTimeFormat('en-US',{timeZone:state.settings.zone,weekday:'long',month:'long',day:'numeric'}).format(Date.now());
   $('page-title').textContent=view==='overview'?'Overview':'Calendar';$('week-panel').hidden=view!=='overview';$('calendar-panel').hidden=view!=='calendar';
   const select=$('course-filter'),selected=select.value,courses=Object.values(state.courses).filter(c=>C.isCourseActive(state,c.key)).sort((a,b)=>a.title.localeCompare(b.title));select.replaceChildren(new Option('All courses',''),...courses.map(c=>new Option(c.title,c.key)));select.value=courses.some(c=>c.key===selected)?selected:'';
   const job=state.job;$('sync').textContent=job?.running?'■ Stop':'↻ Sync';$('status').textContent=!state.settings.collecting?'Collection paused':job?.running?`${job.checked} pages checked…`:job?.note||'';
-  for(const source of Object.keys(sourceNames)){
+  for(const source of schoolSources){
     const data=state.sources[source]||{},stamp=data.lastSuccess,age=stamp?Date.now()-stamp:0;
     const issue=data.outcome==='login'?'Sign in':data.outcome==='partial'?'Partial':data.outcome==='unselected'?'Choose courses':['error','unreadable'].includes(data.outcome)?'Read failed':'';
     $(source+'-freshness').textContent=`${stamp?`${age>86400000?'Stale · ':''}${relative(stamp)}`:data.lastPageSuccess?'List read '+relative(data.lastPageSuccess):'Not synced'}${issue?' · '+issue:''}`;
@@ -91,7 +92,7 @@ function render(){
   const items=baseItems();renderWeek(items);if(view==='calendar')renderCalendar(items);renderList(items);
   if($('courses-dialog').open)renderCourses();if($('coverage-dialog').open)renderCoverage();
 }
-function openEditor(id){const original=state.items[id],item=C.effective(original);editingId=id;$('edit-title').textContent=item.title;$('edit-source').textContent=`Source: ${original.dueAt||original.dueDate?dateLabel(original)+' '+timeLabel(original):original.dueRaw||'No deadline'}`;$('edit-date').value=dayOf(item);$('edit-time').value=item.dueAt?new Intl.DateTimeFormat('en-GB',{timeZone:state.settings.zone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(item.dueAt)):'';$('edit-zone').textContent=state.settings.zone;$('edit-error').textContent='';$('reset-due').hidden=!item.dueOverride;$('edit-dialog').showModal();}
+function openEditor(id){const original=T.taskItem(state,id,false),item=C.effective(original);editingId=id;$('edit-title').textContent=item.title;$('edit-source').textContent=`Source: ${original.dueAt||original.dueDate?dateLabel(original)+' '+timeLabel(original):original.dueRaw||'No deadline'}`;$('edit-date').value=dayOf(item);$('edit-time').value=item.dueAt?new Intl.DateTimeFormat('en-GB',{timeZone:state.settings.zone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(item.dueAt)):'';$('edit-zone').textContent=state.settings.zone;$('edit-error').textContent='';$('reset-due').hidden=!item.dueOverride;$('edit-dialog').showModal();}
 function renderCourses(){
   $('courses-title').textContent=state.activeTerm+' courses';const all=Object.values(state.courses),visible=all.filter(c=>!c.inactive&&(!c.term||c.term===state.activeTerm)).sort((a,b)=>a.title.localeCompare(b.title));
   $('course-options').replaceChildren(...visible.map(course=>{const label=el('label','course-option'),check=el('input');check.type='checkbox';check.checked=C.isCourseActive(state,course.key);check.setAttribute('aria-label',`Include ${course.title}`);check.addEventListener('change',()=>act({type:'SET_COURSE',key:course.key,enabled:check.checked}));const info=el('span','',course.title);info.append(el('small','',`${sourceNames[course.source]} · ${course.term||'Confirm current semester'}`));label.append(check,info);return label;}));
@@ -120,7 +121,7 @@ function moveMonth(delta){const date=new Date(month+'-01T12:00:00Z');date.setUTC
 $('month-prev').addEventListener('click',()=>moveMonth(-1));$('month-next').addEventListener('click',()=>moveMonth(1));$('month-today').addEventListener('click',()=>{month=C.dateKey(Date.now(),state.settings.zone).slice(0,7);selectedDay='';render();});
 $('sync').addEventListener('click',()=>act({type:state.job?.running?'STOP_SYNC':'SYNC'}));
 $('courses-open').addEventListener('click',openCourses);$('empty-courses').addEventListener('click',openCourses);$('courses-sync').addEventListener('click',()=>{$('courses-dialog').close();act({type:'SYNC'});});
-for(const source of Object.keys(sourceNames))$(source+'-source').addEventListener('click',()=>openSource(source));
+for(const source of schoolSources)$(source+'-source').addEventListener('click',()=>openSource(source));
 document.querySelectorAll('.close-dialog').forEach(button=>button.addEventListener('click',()=>button.closest('dialog').close()));
 $('force-sync').addEventListener('click',()=>{$('coverage-dialog').close();act({type:'SYNC',force:true});});
 $('coverage-open').addEventListener('click',()=>{renderCoverage();$('coverage-dialog').showModal();});
@@ -133,4 +134,41 @@ $('test-notification').addEventListener('click',()=>act({type:'TEST_NOTIFICATION
 $('export').addEventListener('click',()=>{const items=C.activeItems(state);if(!items.some(i=>!C.isDone(i)&&(i.dueAt||i.dueDate))){toast('No dated assignments to export.');return;}const blob=new Blob([C.calendar(items)],{type:'text/calendar;charset=utf-8'}),url=URL.createObjectURL(blob),a=el('a');a.href=url;a.download=extension?'due-north.ics':'due-north-SAMPLE.ics';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Calendar snapshot exported.');});
 if(!extension){state=new URLSearchParams(location.search).has('empty')?C.emptyState():demoState();$('demo-banner').hidden=false;pearsonReady=true;if(new URLSearchParams(location.search).has('changes')){const item=state.items['sample-0'];item.dueOverride=C.manualDue(C.shiftDay(C.dateKey(Date.now(),state.settings.zone),2),'18:00',state.settings.zone);item.overrideSourceDue={dueAt:'2026-01-01T00:00:00Z',dueDate:null};item.changedAt=Date.now();state.sources.pearson={lastSuccess:Date.now()-3*86400000,outcome:'partial',message:'1 unreadable row'};}}
 if(extension)chrome.storage.onChanged.addListener((changes,area)=>{if(area==='local'&&changes.state){state=C.migrateState(changes.state.newValue);render();}});
-refresh();setInterval(render,60000);
+refresh().then(checkAddHash);setInterval(render,60000);
+window.addEventListener('hashchange',checkAddHash);
+
+function openManual(id=''){
+  const item=id?state.items[id]:null;manualId=id;$('manual-heading').textContent=id?'Edit assignment':'Add assignment';
+  $('manual-course').replaceChildren(new Option('Personal','manual:personal'),...Object.values(state.courses).filter(course=>course.source!=='manual'&&C.isCourseActive(state,course.key)).map(course=>new Option(course.title+' — '+sourceNames[course.source],course.key)));
+  $('manual-title').value=item?.title||'';const selectedCourse=item?.courseKey||$('course-filter').value;$('manual-course').value=selectedCourse&&state.courses[selectedCourse]?.source!=='manual'?selectedCourse:'manual:personal';
+  const effective=item?C.effective(item):null;$('manual-date').value=effective?dayOf(effective):'';$('manual-time').value=effective?.dueAt?new Intl.DateTimeFormat('en-GB',{timeZone:state.settings.zone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(C.effective(item).dueAt)):'';
+  $('manual-url').value=item?.url||'';$('manual-zone').textContent=state.settings.zone;$('manual-error').textContent='';$('manual-dialog').showModal();$('manual-title').focus();
+}
+function checkAddHash(){if(location.hash.startsWith('#add')){if(!$('manual-dialog').open)openManual();history.replaceState(null,'',location.pathname+location.search);}}
+function openDetails(id){
+  detailsId=id;const item=T.taskItem(state,id);if(!item)return;
+  $('details-title').textContent=item.title;$('details-error').textContent='';$('details-sources').replaceChildren();
+  const all=T.members(state,id).filter(member=>C.isCourseActive(state,member.courseKey));
+  for(const member of all){const row=el('div','details-source'),label=el('strong','',sourceNames[member.source]);row.append(label,el('span','',member.course),el('span','',deadlineText(C.effective(member))));if(member.url){const a=el('a','source-link','Open source');a.href=C.assignmentOpenURL(member);a.target='_blank';a.rel='noopener noreferrer';if(extension)a.addEventListener('click',event=>{if(event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();act({type:'OPEN_ASSIGNMENT',id:member.id});});row.append(a);}$('details-sources').append(row);}
+  $('primary-field').hidden=!item.merged;$('primary-source').replaceChildren(...all.map(member=>new Option(sourceNames[member.source]+' — '+member.title,member.id)));$('primary-source').value=item.primaryId||item.id;
+  $('separate-task').hidden=!item.merged;$('edit-manual').hidden=item.merged||item.source!=='manual';$('delete-manual').hidden=item.merged||item.source!=='manual';
+  $('details-hint').textContent=item.merged?'One task in the chart and calendar. Choose its source deadline or keep a custom date.':'Local edits stay here when you sync.';$('details-dialog').showModal();
+}
+function mergeOptions(){
+  const other=$('merge-target').value,all=[...T.members(state,detailsId),...T.members(state,other)];$('merge-primary').replaceChildren(...all.map(item=>new Option(sourceNames[item.source]+' — '+item.title+' · '+deadlineText(C.effective(item)),item.id)));
+  const current=T.taskItem(state,detailsId);$('merge-primary').value=current.primaryId||current.id;
+}
+$('add-assignment').addEventListener('click',()=>openManual());
+$('manual-form').addEventListener('submit',async event=>{event.preventDefault();try{await send({type:'SAVE_MANUAL',id:manualId||undefined,title:$('manual-title').value,courseKey:$('manual-course').value,date:$('manual-date').value,time:$('manual-time').value,url:$('manual-url').value});$('manual-dialog').close();await refresh();toast('Assignment saved.');}catch(error){$('manual-error').textContent=error.message;}});
+$('details-edit-date').addEventListener('click',()=>{$('details-dialog').close();openEditor(detailsId);});
+$('edit-manual').addEventListener('click',()=>{$('details-dialog').close();openManual(detailsId);});
+$('delete-manual').addEventListener('click',async()=>{const id=detailsId;try{await send({type:'DELETE_MANUAL',id});$('details-dialog').close();await refresh();toast('Assignment deleted.');const undo=el('button','button secondary','Undo');undo.addEventListener('click',async()=>{await act({type:'RESTORE_MANUAL',id});$('toast').hidden=true;});$('toast').append(undo);clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').hidden=true;},15000);}catch(error){$('details-error').textContent=error.message;}});
+$('primary-source').addEventListener('change',async()=>{try{await send({type:'SET_PRIMARY',id:detailsId,primaryId:$('primary-source').value});await refresh();}catch(error){$('details-error').textContent=error.message;}});
+$('separate-task').addEventListener('click',async()=>{try{await send({type:'SEPARATE_TASK',id:detailsId});$('details-dialog').close();await refresh();toast('Sources separated.');}catch(error){$('details-error').textContent=error.message;}});
+$('merge-open').addEventListener('click',()=>{
+  const item=T.taskItem(state,detailsId),options=C.activeItems(state).filter(candidate=>candidate.id!==detailsId).sort((a,b)=>Number(b.title.toLowerCase()===item.title.toLowerCase())-Number(a.title.toLowerCase()===item.title.toLowerCase())||a.title.localeCompare(b.title));
+  $('merge-title').textContent=item.title;$('merge-target').replaceChildren(...options.map(candidate=>new Option(candidate.title+' — '+candidate.course+' ('+(candidate.merged?'Merged':sourceNames[candidate.source])+')',candidate.id)));
+  $('merge-error').textContent=options.length?'':'No other assignments to merge.';$('merge-submit').disabled=!options.length;mergeOptions();$('details-dialog').close();$('merge-dialog').showModal();
+});
+$('merge-target').addEventListener('change',mergeOptions);
+$('merge-form').addEventListener('submit',async event=>{event.preventDefault();try{await send({type:'MERGE_TASKS',id:detailsId,otherId:$('merge-target').value,primaryId:$('merge-primary').value});$('merge-dialog').close();await refresh();toast('Assignments merged.');}catch(error){$('merge-error').textContent=error.message;}});
