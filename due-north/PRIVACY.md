@@ -1,6 +1,6 @@
 # Due North privacy information
 
-Version 0.5.0. Local browser storage only; no developer server, analytics, advertising, remote code, or cloud-synced storage.
+Version 0.5.1. Local browser storage only; no developer server, analytics, advertising, remote code, or cloud-synced storage.
 
 ## Stored information
 

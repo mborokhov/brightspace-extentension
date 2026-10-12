@@ -6,6 +6,6 @@ Purdue assignment tracker for Brightspace, Gradescope, and MyLab Math. No API ke
 
 See [setup and usage](due-north/README.md), [privacy](due-north/PRIVACY.md), and [validation](due-north/TESTING.md).
 
-Version 0.5.0 adds a Windows 95 theme, a toolbar quick view, manual assignments, and reversible cross-platform merging. It retains editable deadlines, weekly workload, the calendar, current-semester filtering, quiet syncing, and optional MyLab Math collection. Google Calendar live sync is not connected; signed-in site layouts still need live verification.
+Version 0.5.1 includes a softer Windows 95 inspired theme, a toolbar quick view, manual assignments, and reversible cross-platform merging. It retains editable deadlines, weekly workload, the calendar, current-semester filtering, quiet syncing, and optional MyLab Math collection. Google Calendar live sync is not connected; signed-in site layouts still need live verification.
 
 Click the extension icon for upcoming deadlines, completion, and Sync. Choose Open planner for the dashboard, or Add for its manual assignment editor. Merge duplicate copies from an assignment's Details menu; both source links remain available.

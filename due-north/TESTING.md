@@ -1,4 +1,4 @@
-# Validation record — v0.5.0
+# Validation record — v0.5.1
 
 ## Verified
 
@@ -41,6 +41,12 @@ The available browser has no signed-in school tabs. Real Chrome/Edge offscreen l
 - The additional DOM fixture verifies Brightspace cross-platform links are retained with sensitive query parameters removed. All 27 fixtures passed in a real DOMParser environment.
 
 These checks use synthetic data and mocked extension APIs. The toolbar's actual Chrome/Edge popup lifecycle, notification delivery, and signed-in integrations remain installed-extension acceptance checks. Browser viewport overrides did not apply in this preview environment, so narrow-window behavior has not been visually verified.
+
+## v0.5.1 appearance checks
+
+- Replaced heavy black/white bevels and repeated navy panel headers with warm surfaces, muted teal, thin outlines, subtle highlights, and restrained navy accents. The pixel compass and compact taskbar remain. No sync or storage logic changed.
+- Visually inspected Overview, Calendar, manual editor, merged assignment details, and toolbar popup with synthetic data. Created a manual assignment and completed a popup task; controls still worked. Exactly two navigation views remain.
+- All 90 existing Node tests and static asset/CSP checks pass. No console errors observed in the dashboard or popup. The sample-preview banner remains visible only outside the installed extension.
 
 ## Reproduce
 

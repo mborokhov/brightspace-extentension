@@ -2,7 +2,7 @@
 
 A shareable Chrome/Edge extension for Purdue Brightspace, Gradescope, and MyLab Math. No API key, server, or build step. Each person uses their own school login and browser storage.
 
-**Version 0.5.0 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
+**Version 0.5.1 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
 
 ## Install or update
 
@@ -32,7 +32,7 @@ Semester detection uses Spring (January–May), Summer (June–July), and Fall (
 
 ## Dashboard
 
-The Windows 95 theme uses a teal desktop, navy title bars, gray beveled controls, a taskbar, and an original pixel compass. It uses system fonts and local assets.
+The softer Windows 95 inspired theme uses a muted teal desktop, warm off-white panels, thin borders, subtle button highlights, navy window title bars, and a compact taskbar with an original pixel compass. It uses system fonts and local assets.
 
 - **Toolbar popup:** the next six incomplete deadlines, completion checkboxes, Sync/Stop, **Open planner**, and **Add**. Changes share the dashboard's local store. Add opens its assignment editor without opening school pages.
 - **Add assignment:** enter a name, choose a current course or Personal, and optionally add a date, time, and HTTPS link. Manual assignments appear in the list, chart, calendar, popup, reminders, and export. Details offers Edit assignment and Delete assignment with a 15-second Undo. They stay scoped to their semester and survive school syncs.
