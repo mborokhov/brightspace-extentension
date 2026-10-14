@@ -56,7 +56,7 @@ function renderList(items){
   const body=$('assignment-rows');body.replaceChildren();
   for(const item of filtered){
     const done=C.isDone(item),past=!done&&item.dueAt&&Date.parse(item.dueAt)<now,row=el('tr',done?'completed':'');
-    const checkCell=el('td'),check=el('input','completion');check.type='checkbox';check.checked=done;check.setAttribute('aria-label',`Mark ${item.title} ${done?'incomplete':'complete'}`);check.addEventListener('change',()=>act({type:'SET_ITEM',id:item.id,completionOverride:check.checked?'done':'todo'}));checkCell.append(check);row.append(checkCell);
+    const checkCell=el('td'),check=el('input','completion');check.type='checkbox';check.checked=done;check.setAttribute('aria-label',`Mark ${item.title} ${done?'incomplete':'complete'}`);check.addEventListener('change',()=>act({type:'SET_ITEM',id:item.id,completionOverride:check.checked?'done':'todo'}));const target=el('label','completion-target');target.append(check);checkCell.append(target);row.append(checkCell);
     const nameCell=el('td'),hasLink=!!C.assignmentOpenURL(item),link=el(extension&&hasLink?'a':'button','assignment-link',item.title);
     if(link.tagName==='A'){link.href=C.assignmentOpenURL(item);link.target='_blank';link.rel='noopener noreferrer';link.addEventListener('click',event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();act({type:'OPEN_ASSIGNMENT',id:item.id});});}
     else{link.type='button';link.addEventListener('click',()=>openDetails(item.id));}nameCell.append(link);
@@ -77,10 +77,10 @@ function renderList(items){
   $('empty-description').textContent=!courseCount?'Open your course lists, then select your current classes.':items.length?'Try another date or filter.':'Visit Assignments, Quizzes, or Homework and Tests, then sync.';
 }
 function render(){
-  state=C.migrateState(state);$('desktop-clock').textContent=new Intl.DateTimeFormat('en-US',{timeZone:state.settings.zone,hour:'numeric',minute:'2-digit'}).format(Date.now());document.querySelector('.titlebar-caption').textContent=state.activeTerm;$('semester').textContent=state.activeTerm;$('today-label').textContent=new Intl.DateTimeFormat('en-US',{timeZone:state.settings.zone,weekday:'long',month:'long',day:'numeric'}).format(Date.now());
+  state=C.migrateState(state);$('semester').textContent=state.activeTerm;$('today-label').textContent=new Intl.DateTimeFormat('en-US',{timeZone:state.settings.zone,weekday:'long',month:'long',day:'numeric'}).format(Date.now());
   $('page-title').textContent=view==='overview'?'Overview':'Calendar';$('week-panel').hidden=view!=='overview';$('calendar-panel').hidden=view!=='calendar';
   const select=$('course-filter'),selected=select.value,courses=Object.values(state.courses).filter(c=>C.isCourseActive(state,c.key)).sort((a,b)=>a.title.localeCompare(b.title));select.replaceChildren(new Option('All courses',''),...courses.map(c=>new Option(c.title,c.key)));select.value=courses.some(c=>c.key===selected)?selected:'';
-  const job=state.job;$('sync').textContent=job?.running?'■ Stop':'↻ Sync';$('status').textContent=!state.settings.collecting?'Collection paused':job?.running?`${job.checked} pages checked…`:job?.note||'';
+  const job=state.job;DNUI.buttonLabel($('sync'),job?.running?'Stop':'Sync',job?.running?'stop':'sync');$('status').textContent=!state.settings.collecting?'Collection paused':job?.running?`${job.checked} pages checked…`:job?.note||'';
   for(const source of schoolSources){
     const data=state.sources[source]||{},stamp=data.lastSuccess,age=stamp?Date.now()-stamp:0;
     const issue=data.outcome==='login'?'Sign in':data.outcome==='partial'?'Partial':data.outcome==='unselected'?'Choose courses':['error','unreadable'].includes(data.outcome)?'Read failed':'';

@@ -2,7 +2,7 @@
 
 A shareable Chrome/Edge extension for Purdue Brightspace, Gradescope, and MyLab Math. No API key, server, or build step. Each person uses their own school login and browser storage.
 
-**Version 0.5.1 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
+**Version 0.6.0 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
 
 ## Install or update
 
@@ -32,7 +32,7 @@ Semester detection uses Spring (January–May), Summer (June–July), and Fall (
 
 ## Dashboard
 
-The softer Windows 95 inspired theme uses a muted teal desktop, warm off-white panels, thin borders, subtle button highlights, navy window title bars, and a compact taskbar with an original pixel compass. It uses system fonts and local assets.
+The Apple-style design uses cool gray backgrounds, unified white panels, thin separators, one blue accent, a monochrome compass, and subtle glass navigation. Overview, Calendar, popup, dialogs, and Help share one set of design tokens. Dialogs support keyboard dismissal and respect reduced motion, reduced transparency, and increased contrast preferences. System fonts adapt to Windows and macOS; no Apple fonts or SF Symbol assets are bundled.
 
 - **Toolbar popup:** the next six incomplete deadlines, completion checkboxes, Sync/Stop, **Open planner**, and **Add**. Changes share the dashboard's local store. Add opens its assignment editor without opening school pages.
 - **Add assignment:** enter a name, choose a current course or Personal, and optionally add a date, time, and HTTPS link. Manual assignments appear in the list, chart, calendar, popup, reminders, and export. Details offers Edit assignment and Delete assignment with a 15-second Undo. They stay scoped to their semester and survive school syncs.
@@ -81,4 +81,4 @@ Parser fixtures: `http://127.0.0.1:4173/tests/browser.html`
 
 Outside the installed extension, the dashboard shows labelled sample data. Preview edits stay in memory. Real installations start empty. Reload the extension and school tabs after changing its files.
 
-`extension/` contains the distributable app; `tests/` contains Node and browser fixtures; `scripts/` contains static checks and the preview server. See [TESTING.md](TESTING.md) and [PRIVACY.md](PRIVACY.md). MIT licensed. Independent project, not affiliated with Purdue, D2L, Gradescope, or Pearson.
+`extension/` contains the distributable app; `tests/` contains Node and browser fixtures; `scripts/` contains static checks and the preview server. See [TESTING.md](TESTING.md), [PRIVACY.md](PRIVACY.md), and [design credits](THIRD_PARTY_NOTICES.md). MIT licensed. Independent project, not affiliated with Purdue, D2L, Gradescope, or Pearson.

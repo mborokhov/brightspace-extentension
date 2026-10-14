@@ -16,10 +16,10 @@ function render(){
     info.append(name,el('small','',item.course+' · '+(item.merged?'Merged':T.SOURCES[item.source])));
     const day=item.dueAt?C.dateKey(item.dueAt,zone):item.dueDate,overdue=item.dueAt?Date.parse(item.dueAt)<Date.now():day&&day<today;
     const date=day===today?'Today':day?new Intl.DateTimeFormat('en-US',{timeZone:'UTC',month:'short',day:'numeric'}).format(new Date(day+'T12:00Z')):'No date',time=item.dueAt?new Intl.DateTimeFormat('en-US',{timeZone:zone,hour:'numeric',minute:'2-digit'}).format(new Date(item.dueAt)):day?'All day':'';
-    const due=el('div','popup-due'+(overdue?' overdue':''),date);due.append(el('small','',overdue?'Past due · '+time:time));row.append(check,info,due);$('popup-list').append(row);
+    const due=el('div','popup-due'+(overdue?' overdue':''),date);due.append(el('small','',overdue?'Past due · '+time:time));const target=el('label','completion-target');target.append(check);row.append(target,info,due);$('popup-list').append(row);
   }
   if(!items.length)$('popup-list').append(el('div','popup-empty',C.activeItems(state).length?'All caught up.':'Add an assignment or open your course lists to get started.'));
-  $('popup-sync').textContent=state.job?.running?'Stop':'Sync';const login=Object.entries(state.sources).find(([,source])=>source.outcome==='login');
+  DNUI.buttonLabel($('popup-sync'),state.job?.running?'Stop':'Sync',state.job?.running?'stop':'sync');const login=Object.entries(state.sources).find(([,source])=>source.outcome==='login');
   $('popup-status').textContent=state.job?.running?`Syncing · ${state.job.checked} pages checked`:login?'Sign in to '+T.SOURCES[login[0]]:state.job?.note||C.activeItems(state).filter(item=>!C.isDone(item)).length+' assignments to do';
 }
 async function refresh(){try{if(extension)state=(await send({type:'GET_STATE'})).state;render();}catch(error){$('popup-error').textContent=error.message;}}

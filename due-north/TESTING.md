@@ -1,4 +1,4 @@
-# Validation record — v0.5.1
+# Validation record — v0.6.0
 
 ## Verified
 
@@ -47,6 +47,15 @@ These checks use synthetic data and mocked extension APIs. The toolbar's actual 
 - Replaced heavy black/white bevels and repeated navy panel headers with warm surfaces, muted teal, thin outlines, subtle highlights, and restrained navy accents. The pixel compass and compact taskbar remain. No sync or storage logic changed.
 - Visually inspected Overview, Calendar, manual editor, merged assignment details, and toolbar popup with synthetic data. Created a manual assignment and completed a popup task; controls still worked. Exactly two navigation views remain.
 - All 90 existing Node tests and static asset/CSP checks pass. No console errors observed in the dashboard or popup. The sample-preview banner remains visible only outside the installed extension.
+
+## v0.6.0 Apple-style presentation
+
+- Shared visual tokens for cool gray ground, solid white content panels, thin dividers, a blue accent, capsule controls, and restrained glass navigation/overlays. Replaced the retro title strip/taskbar with a compact sidebar and local-storage footer. Overview, Calendar, popup, Help, and all eight dialogs use the same visual system. SVG/PNG compass and line icons are original code-native assets; no external fonts, icon packages, or runtime dependencies are added.
+- Visually inspected manual and deadline editors, merged details, merge choices, Courses, Settings, nested Clear confirmation (cancelled), Sync details, Calendar, popup, and Help. Created a manual task; edited a deadline through Calendar and observed its new date; completed a popup task and observed its replacement; opened Add from an empty-state hash. Escape closed Settings and restored focus to its originating button. Native dialog close transitions did not prevent switching to another dialog.
+- Browser diagnostics: no console errors in dashboard/popup, no broken images, exactly two navigation views, and native discrete dialog transitions supported. Dialogs have accessible names; primary controls and completion labels have generous hit areas. CSS includes reduced motion, reduced transparency, and increased contrast alternatives. OS preference variants have not been manually exercised.
+- All 90 existing Node tests, 27 real-DOM parser fixtures, static JavaScript/assets/CSP checks, and Git whitespace checks pass. Browser viewport overrides still did not apply (the preview stayed at 1280px), so narrow-window layouts remain a live acceptance check. Calendar and table containers retain horizontal scrolling at small widths.
+
+These presentation checks use sample data. Source readers, sync transport, worker privileges, and local storage schema are unchanged. Installed Chrome/Edge popup lifecycle, notifications, and signed-in school responses still need live verification.
 
 ## Reproduce
 
