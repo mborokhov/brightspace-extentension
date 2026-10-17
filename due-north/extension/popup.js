@@ -14,13 +14,14 @@ function render(){
     const row=el('div','popup-task'),check=el('input');check.type='checkbox';check.setAttribute('aria-label',`Mark ${item.title} complete`);check.addEventListener('change',()=>action({type:'SET_ITEM',id:item.id,completionOverride:'done'}));
     const info=el('div'),name=el('button','popup-name',item.title);name.addEventListener('click',()=>{if(C.assignmentOpenURL(item)&&extension)action({type:'OPEN_ASSIGNMENT',id:item.id});else openPlanner();});
     info.append(name,el('small','',item.course+' · '+(item.merged?'Merged':T.SOURCES[item.source])));
-    const day=item.dueAt?C.dateKey(item.dueAt,zone):item.dueDate,overdue=item.dueAt?Date.parse(item.dueAt)<Date.now():day&&day<today;
+    const day=item.dueAt?C.dateKey(item.dueAt,zone):item.dueDate,overdue=C.deadlineStatus(item,zone).kind==='past';
     const date=day===today?'Today':day?new Intl.DateTimeFormat('en-US',{timeZone:'UTC',month:'short',day:'numeric'}).format(new Date(day+'T12:00Z')):'No date',time=item.dueAt?new Intl.DateTimeFormat('en-US',{timeZone:zone,hour:'numeric',minute:'2-digit'}).format(new Date(item.dueAt)):day?'All day':'';
     const due=el('div','popup-due'+(overdue?' overdue':''),date);due.append(el('small','',overdue?'Past due · '+time:time));const target=el('label','completion-target');target.append(check);row.append(target,info,due);$('popup-list').append(row);
   }
   if(!items.length)$('popup-list').append(el('div','popup-empty',C.activeItems(state).length?'All caught up.':'Add an assignment or open your course lists to get started.'));
   DNUI.buttonLabel($('popup-sync'),state.job?.running?'Stop':'Sync',state.job?.running?'stop':'sync');const login=Object.entries(state.sources).find(([,source])=>source.outcome==='login');
   $('popup-status').textContent=state.job?.running?`Syncing · ${state.job.checked} pages checked`:login?'Sign in to '+T.SOURCES[login[0]]:state.job?.note||C.activeItems(state).filter(item=>!C.isDone(item)).length+' assignments to do';
+  if(state.google?.enabled||state.google?.disconnecting)$('popup-status').textContent+=' · '+(state.google.error?'Calendar sync needs attention':state.google.pending?'Calendar update pending':'Calendar up to date');
 }
 async function refresh(){try{if(extension)state=(await send({type:'GET_STATE'})).state;render();}catch(error){$('popup-error').textContent=error.message;}}
 async function openPlanner(mode){try{if(extension){await send({type:'OPEN_DASHBOARD',mode});window.close();}else window.open('dashboard.html'+(mode==='add'?'#add':''),'_blank','noopener');}catch(error){$('popup-error').textContent=error.message;}}

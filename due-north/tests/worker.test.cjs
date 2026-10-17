@@ -1,28 +1,5 @@
-const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
-function harness(saved,pearson=false) {
-  const events={};const event=name=>({addListener:fn=>{events[name]=fn;}});
-  const store=saved?structuredClone(saved):{},tabs=new Map(),removed=[],notifications=[],created=[];
-  let nextTab=1;
-  const rescans=[],updates=[],rescan={handle:async()=>({readerVersion:4})};
-  const scripts=[];const chrome={permissions:{contains:async()=>pearson,onRemoved:event('permissionRemoved')},scripting:{getRegisteredContentScripts:async()=>scripts,unregisterContentScripts:async()=>{scripts.length=0;},registerContentScripts:async value=>scripts.push(...value)},runtime:{id:'test-extension',getURL:p=>'chrome-extension://test-extension/'+p,onMessage:event('message'),onInstalled:event('installed'),onStartup:event('startup')},
-    storage:{local:{get:async key=>structuredClone({[key]:store[key]}),set:async value=>Object.assign(store,structuredClone(value)),setAccessLevel:async()=>{}}},
-    action:{onClicked:event('action')},alarms:{create:async()=>{},onAlarm:event('alarm')},
-    tabs:{query:async options=>[...tabs.values()].filter(t=>!options?.url||(Array.isArray(options.url)?options.url:[options.url]).some(u=>t.url?.startsWith(u.replace(/\*$/,'')))),sendMessage:async(id,message)=>{rescans.push({id,message});return rescan.handle(id,message);},create:async options=>{const tab={...options,id:nextTab++};tabs.set(tab.id,tab);created.push(tab);return tab;},get:async id=>{if(!tabs.has(id))throw Error('No tab');return tabs.get(id);},update:async(id,change)=>{updates.push({id,change});if(tabs.has(id))Object.assign(tabs.get(id),change);},onUpdated:event('updated'),onActivated:event('activated'),remove:async id=>{removed.push(id);tabs.delete(id);},onRemoved:event('removed')},
-    notifications:{create:async(id,options)=>{notifications.push({id,options});},onClicked:event('notification')}
-  };
-  const context=vm.createContext({chrome,console,URL,Date,Intl,TextEncoder,AbortController,setTimeout,clearTimeout});
-  context.importScripts=(...files)=>{for(const file of files)vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension',file),'utf8'),context);};
-  vm.runInContext(fs.readFileSync(path.join(__dirname,'../extension/background.js'),'utf8'),context);
-  const reads=[],transport={handle:async()=>({kind:'render'})};context.DNBackground.read=async(...args)=>{reads.push(args);return transport.handle(...args);};
-  const admin={id:'test-extension',url:'chrome-extension://test-extension/dashboard.html'};
-  const message=async(payload,sender=admin)=>{
-    if(payload.type==='CAPTURE'&&payload.snapshot.requestId===undefined&&store.state?.job?.tabId===sender.tab?.id)payload={...payload,snapshot:{...payload.snapshot,requestId:store.state.job.pageToken}};
-    const result=await new Promise(resolve=>events.message(payload,sender,resolve));
-    await new Promise(resolve=>setImmediate(resolve));return result;
-  };
-  const settle=()=>message({type:'GET_STATE'});
-  return {reads,transport,store,tabs,scripts,rescans,updates,rescan,removed,notifications,created,events,message,settle,admin,context};
-}
+const {test}=require('node:test'),assert=require('node:assert/strict');
+const harness=require('./worker-harness.cjs');
 const C=require('../extension/core.js'),term=C.currentTerm();
 const url='https://www.gradescope.com/courses/42';
 const sender={id:'test-extension',url,tab:{id:500}};
@@ -314,4 +291,10 @@ test('popup Add reuses existing dashboard with an editor hash and never opens an
  const h=harness();h.tabs.set(9,{id:9,url:'chrome-extension://test-extension/dashboard.html'});
  await h.message({type:'OPEN_DASHBOARD',mode:'add'},{...h.admin,url:'chrome-extension://test-extension/popup.html'});
  assert.equal(h.created.length,0);assert.equal(h.updates[0].id,9);assert.match(h.updates[0].change.url,/#add=/);assert.equal(h.updates[0].change.active,true);
+});
+test('Brightspace yearless due dates use a known course semester even when capture has no term label',async()=>{
+ const key='brightspace:42',url='https://purdue.brightspace.com/d2l/lms/dropbox/user/folders_list.d2l?ou=42',state=C.emptyState();state.courses[key]={key,id:'42',source:'brightspace',title:'Fall 2026 ECE 33700',term:'Fall 2026',enabled:true};
+ const h=harness({state}),page={id:'test-extension',url,tab:{id:500}};
+ await h.message({type:'CAPTURE',snapshot:{pageURL:url,title:'Assignments',course:{id:'42',title:'Course 42'},items:[{title:'CDL RTL Diagrams',url:'https://purdue.brightspace.com/d2l/lms/dropbox/user/folder_submit_files.d2l?ou=42&db=99',dueRaw:'Nov 22 at 11:59 PM',status:'not-submitted'}],links:[],settled:true}},page);
+ const saved=Object.values((await h.settle()).state.items)[0];assert.equal(saved.dueAt,'2026-11-23T04:59:00.000Z');assert.equal(C.deadlineStatus(saved,'America/New_York',Date.parse('2026-10-17T16:00Z')).label,'In 36 days');
 });

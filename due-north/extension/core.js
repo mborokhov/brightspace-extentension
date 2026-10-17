@@ -117,7 +117,7 @@
     }
     return matches.size === 1 ? new Date([...matches][0]).toISOString() : null;
   }
-  function parseDue(raw, zone = 'America/New_York', now = Date.now()) {
+  function parseDue(raw, zone = 'America/New_York', now = Date.now(), term = null) {
     const text = clean(raw), result = {dueAt: null, dueDate: null, dueRaw: text, dateNote: ''};
     if (!text || /^(?:—|-|none|no due date|n\/a)$/i.test(text)) return {...result, dateNote: 'No deadline listed'};
     if (!validZone(zone)) return {...result, dateNote: 'Invalid time zone'};
@@ -140,8 +140,10 @@
     else return {...result, dateNote: 'Unrecognized deadline — check source'};
     if (!y) {
       inferred = true;
-      const current = zoneParts(now, zone).year;
-      y = [current - 1, current, current + 1].sort((a, b) => Math.abs(Date.UTC(a, m - 1, d) - now) - Math.abs(Date.UTC(b, m - 1, d) - now))[0];
+      const context=parseTerm(term),current=context?Number(context.slice(-4)):zoneParts(now,zone).year;
+      // Anchor missing years to the course semester, including Fall → January rollover.
+      const anchor=context?Date.UTC(current,/^Spring/.test(context)?2:/^Summer/.test(context)?5:9,15):now;
+      y = [current - 1, current, current + 1].sort((a, b) => Math.abs(Date.UTC(a, m - 1, d) - anchor) - Math.abs(Date.UTC(b, m - 1, d) - anchor))[0];
     }
     const date = new Date(Date.UTC(y, m - 1, d));
     if (date.getUTCMonth() !== m - 1 || date.getUTCDate() !== d) return {...result, dateNote: 'Invalid date — check source'};
@@ -182,9 +184,32 @@
       state.schema = 2;
     }
     state.items=deduplicateItems(state.items);
-    for(const item of Object.values(state.items))if(item.source==='pearson'&&!item.dueAt&&!item.dueDate&&item.dueRaw)Object.assign(item,parseDue(item.dueRaw,state.settings.zone,now));
+    repairDeadlines(state,now);
     root.DNTasks?.reconcileGroups(state);
     return state;
+  }
+  function repairDeadlines(state,now=Date.now(),force=false){
+    const baselines=Object.values(state.groups||{}).filter(group=>group.overrideSourceDue&&sameDeadline(group.overrideSourceDue,root.DNTasks?.taskItem(state,group.id,false)));
+    for(const item of Object.values(state.items)){
+      if(item.source==='manual'||!item.dueRaw)continue;
+      const term=parseTerm(state.courses[item.courseKey]?.term||item.term),context=JSON.stringify([1,state.settings.zone,term]);
+      if(!force&&item.deadlineContext===context)continue;
+      const matched=item.overrideSourceDue&&sameDeadline(item.overrideSourceDue,item);
+      const parsed=parseDue(item.dueRaw,state.settings.zone,now,term),oldDate=item.dueAt||item.dueDate,newDate=parsed.dueAt||parsed.dueDate;
+      const repair=force||!oldDate||/inferred/i.test(item.dateNote)||/inferred/i.test(parsed.dateNote)||oldDate&&newDate&&oldDate.slice(0,4)!==newDate.slice(0,4);
+      if(repair)Object.assign(item,parsed);item.deadlineContext=context;
+      if(matched&&repair)item.overrideSourceDue={dueAt:item.dueAt,dueDate:item.dueDate};
+    }
+    for(const group of baselines){const original=root.DNTasks?.taskItem(state,group.id,false);if(original)group.overrideSourceDue={dueAt:original.dueAt,dueDate:original.dueDate};}
+  }
+  function deadlineStatus(item,zone='America/New_York',now=Date.now()){
+    const value=effective(item),instant=value.dueAt?Date.parse(value.dueAt):NaN;
+    const day=Number.isFinite(instant)?dateKey(instant,zone):value.dueDate||'',today=dateKey(now,zone);
+    if(isDone(value))return {kind:'done',label:'Completed',day};
+    if(!/^\d{4}-\d{2}-\d{2}$/.test(day)||!Number.isFinite(Date.parse(day+'T12:00Z')))return {kind:'',label:'To do',day:''};
+    if(Number.isFinite(instant)?instant<now:day<today)return {kind:'past',label:'Past due',day};
+    const days=Math.round((Date.parse(day+'T12:00Z')-Date.parse(today+'T12:00Z'))/86400000);
+    return {kind:days<2?'soon':'',label:days===0?'Due today':days===1?'Tomorrow':`In ${days} days`,day,days};
   }
   function isCourseActive(state,key) { const c = state.courses[key]; return !!(c?.enabled && !c.inactive && c.term === state.activeTerm); }
   function effective(item) { return item.dueOverride ? {...item,...item.dueOverride,dateNote:'Edited by you'} : item; }
@@ -287,7 +312,7 @@
     }
     lines.push('END:VCALENDAR'); return lines.map(foldICS).join('\r\n') + '\r\n';
   }
-  const api = {HOSTS,PEARSON_HOSTS,HOMES,clean,allowedURL,canonicalURL,sourceFor,pageKind,canInspectPearson,courseId,hash,assignmentId,assignmentTitle,assignmentOpenURL,courseListURL,sameDeadline,captureOutcome,isEventAlias,deduplicateItems,validZone,parseDue,zonedISO,emptyState,isDone,mergeItems,dueReminders,calendar,parseTerm,currentTerm,courseKey,migrateState,isCourseActive,effective,activeItems,manualDue,dateKey,shiftDay,weekStart,weekCounts};
+  const api = {HOSTS,PEARSON_HOSTS,HOMES,clean,allowedURL,canonicalURL,sourceFor,pageKind,canInspectPearson,courseId,hash,assignmentId,assignmentTitle,assignmentOpenURL,courseListURL,sameDeadline,captureOutcome,isEventAlias,deduplicateItems,validZone,parseDue,repairDeadlines,deadlineStatus,zonedISO,emptyState,isDone,mergeItems,dueReminders,calendar,parseTerm,currentTerm,courseKey,migrateState,isCourseActive,effective,activeItems,manualDue,dateKey,shiftDay,weekStart,weekCounts};
   root.DNCore = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(globalThis);

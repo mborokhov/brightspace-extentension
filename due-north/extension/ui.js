@@ -10,6 +10,7 @@
     plus:'M12 4v16M4 12h16',
     close:'M6 6l12 12M6 18 18 6',
     sync:'M20 9a8 8 0 0 0-14-3L3 9m0-6v6h6M4 15a8 8 0 0 0 14 3l3-3m0 6v-6h-6',
+    filter:'M4 6h16M7 12h10M10 18h4',
     stop:'M5 5h14v14H5z',
     export:'M12 3v12m-4-4 4 4 4-4M4 15v6h16v-6',
     expand:'M14 3h7v7m0-7-10 10M10 5H3v16h16v-7'

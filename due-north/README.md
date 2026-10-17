@@ -2,7 +2,7 @@
 
 A shareable Chrome/Edge extension for Purdue Brightspace, Gradescope, and MyLab Math. No API key, server, or build step. Each person uses their own school login and browser storage.
 
-**Version 0.6.0 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
+**Version 0.7.1 · beta.** Local tests cover the supplied layouts. Signed-in site layouts, especially Pearson, still need live verification.
 
 ## Install or update
 
@@ -39,29 +39,44 @@ The Apple-style design uses cool gray backgrounds, unified white panels, thin se
 - **Merge copies:** Details → Merge with lets you combine copies of one assignment and choose which source supplies its name, deadline, and default link. Both source links remain available. Custom dates and completion choices survive sync. Separate sources reverses the merge and preserves local edits.
 - **Automatic merging:** a Brightspace row directly linking to the exact native Gradescope/MyLab assignment can combine their existing records. Each platform must have one unambiguous target; names and dates alone never auto-merge. A combined task counts once in the chart, calendar, popup, reminders, and export. It stays pending until every source is complete, unless you set a local completion override. Separating sources prevents them from automatically merging again.
 
-- **Overview:** a Monday–Sunday chart of incomplete assignments, week navigation, and a searchable assignment list. Click a bar to filter by day.
+- **Overview:** a Monday–Sunday chart of incomplete assignments, week navigation, and a searchable assignment list. Hover changes only the bar fill. Click a bar to filter by day; a blue date label/checkmark and a visible day-filter strip show the selection. **Show all assignments** clears it. Keyboard selection retains focus.
 - **Calendar:** month navigation and assignments on their due dates. Click an assignment to edit its deadline.
 - **Edit date:** sets a local deadline, optionally without a time. Later syncs preserve it. If the source deadline changes after your edit, the row shows both dates. **Use source date** restores the latest source deadline. Edits affect the chart, calendar, reminders, and export; they never modify the school site.
 - **Completion:** checkboxes are local overrides. **Use source status** removes an override. On Brightspace quiz lists, any populated Evaluation Status cell means completed; attempts alone do not. “Not Submitted” assignments stay pending.
 - **Duplicate cleanup:** Brightspace calendar links such as “View Event - Written Homework 11 - Due” are excluded from new scans. Native assignment IDs also reconcile renamed records. Existing copies reconcile with the same-course assignment, preserving local deadline and completion choices. Ambiguous same-name assignments and distinct native assignment IDs stay separate.
 - **Brightspace links:** group assignment links retain their group parameter. Older stored links open the course list until resynced. Regular clicks from Due North fall back to that list if the new assignment tab reaches a Brightspace 500/404 error. The course name also opens the list.
-- **Dates:** Gradescope uses the right-hand due date, excluding the release date and late cutoff. Brightspace uses the “Due on” line under the assignment/quiz name.
-- **Export .ics:** downloads a snapshot of all current-course incomplete assignments with readable dates. Google Calendar live sync is not implemented yet. Importing an .ics file does not create ongoing synchronization.
+- **Dates:** list dates include their year. Upcoming statuses show Due today, Tomorrow, or In N days; date-only tasks become past due after their day ends in the course time zone. Yearless source dates use the course semester when available, including Fall-to-January rollover. Upgrades repair cached inferred years while preserving custom dates/completion. Explicit source years and manually entered dates are retained. Gradescope uses the right-hand due date, excluding the release date and late cutoff. Brightspace uses the “Due on” line under the assignment/quiz name.
+- **Export .ics:** downloads a snapshot of all current-course incomplete assignments with readable dates. Importing an .ics file does not create ongoing synchronization. For live updates, use Google Calendar sync instead; imported copies are not managed by sync.
 
 There are two navigation views: Overview and Calendar. Settings, course selection, and sync details open in dialogs.
 
+## Google Calendar and iPhone reminders
+
+In Google Chrome, open **Calendar → Connect calendar** (also in Settings). Follow the [one-time setup guide](extension/google-setup.html) to enable Calendar API, create a Chrome Extension OAuth client tied to your installed extension ID, and configure its public client ID. No client secret or LMS API key is needed. This release deliberately ships without a fabricated client ID. Edge still supports the planner and school sync, but Google's `getAuthToken` integration requires Chrome.
+
+After setup, Connect requests optional Google host access and Google's calendar consent. Due North creates a separate **Due North — Assignments** calendar using only the `calendar.app.created` scope. It does not need access to your personal calendar.
+
+- Date edits and school deadline changes update the existing event; task completion removes the event and its future reminders. Unchecking restores it with a fresh ID. Manual tasks and merged assignments use the same rules.
+- Deleting a manual task, merging copies, deselecting a course, and semester rollover remove obsolete events. Undo/separation/reselection recreate the needed events. Inferred-year and undated tasks stay local until corrected; date-only tasks become all-day events without reminders.
+- Phone reminders default to **9 AM on the due date**, in the course time zone. Deadlines before 9 AM remind at the deadline. You can choose deadline, one hour, one day, or none. Use the Google Calendar iPhone app with notifications allowed and this calendar visible.
+- Already synced reminders work while your computer is off. New deadlines, date edits, and completion need Chrome online to reach Google. Offline and rate-limited changes persist locally and retry after Chrome resumes. Already delivered notifications cannot be recalled.
+- This is **one-way sync**. Edit tasks in Due North; Google edits do not update local tasks and can be overwritten on reconciliation. **Sync now** also checks for events deleted in Google. Normal reconciliation checks remote events about every six hours while Chrome runs.
+- **Disconnect** removes this installation's tracked events, preserves other events and the calendar itself, and stops syncing. Keep Chrome online until removal finishes. Clear local data is blocked until cleanup finishes. To revoke Google's authorization entirely, remove Due North from your Google account's third-party access settings.
+
+OAuth test-mode grants can expire and managed accounts may restrict access. Due North shows pending/errors and only opens Google's consent flow on Connect/Reconnect. Uncertain initial calendar creation requires an explicit Retry setup, avoiding automatic duplicate calendars. Existing .ics imports cannot be identified; remove imported duplicates yourself.
+
 ## Share
 
-Send the project ZIP or repository link. Friends load their own `extension` folder and use their own browser profile. The source contains no real assignments, cookies, credentials, or browser storage. No programming tools are needed for installation. This is an unpacked extension, not a published Chrome/Edge store listing. Firefox and Safari are not supported.
+Send the project ZIP or repository link. Friends load their own `extension` folder and use their own browser profile. The source contains no real assignments, cookies, credentials, or browser storage. No programming tools are needed for installation. This is an unpacked extension, not a published Chrome/Edge store listing. Firefox and Safari are not supported. The optional Google connection requires Chrome and an OAuth client matching that installation’s extension ID. Friends with a different unpacked ID need their own client; a published, stable Chrome Web Store ID can share one configured client subject to Google’s production consent requirements. Do not change an existing installation’s manifest key or ID, which can make its stored tasks inaccessible.
 
 ## Settings and limits
 
 - Time zone defaults to `America/New_York`. Match the zone shown on your course pages. Explicit timestamp offsets take precedence. Local edits preserve their selected instant if you later change the display time zone.
-- Missing times remain date-only; missing years are inferred and cannot trigger reminders until corrected. Unreadable deadlines remain undated and can be edited.
+- Missing times remain date-only; missing years use the course semester when known (otherwise the nearest year), remain marked as inferred, and cannot trigger reminders until corrected. Unreadable deadlines remain undated and can be edited.
 - Reminders are opt-in, checked about once per minute while the browser runs. Completed, past-due, undated/date-only, inferred-year, and more-than-seven-days-stale school records are excluded. Manual assignments do not need a recent school sync. OS settings can suppress notifications.
 - Partial scans do not delete assignments that disappeared from the page. Cross-platform copies without a direct assignment reference require a manual merge. Links hidden inside unloaded descriptions cannot be used for automatic matching.
 - Only loaded list rows are read. Syllabus PDFs, announcements, closed shadow roots, and unsupported/custom layouts are outside coverage. MyLab Math support currently targets due-first tables, short-year dates such as `09/06/26`, embedded lists, and Course Home date-badge cards on the supported hosts; live verification of your signed-in layout remains necessary.
-- Use one school account per browser profile. Before switching accounts, clear local data in Settings. Clearing pauses collection; enable it again after signing into the new account.
+- Use one school account per browser profile. Before switching school accounts, disconnect Google Calendar, wait for event removal, then clear local data in Settings. Clearing pauses collection; enable it again after signing into the new account.
 
 ## Develop
 

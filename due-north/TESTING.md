@@ -1,9 +1,9 @@
-# Validation record — v0.6.0
+# Validation record — v0.7.1
 
 ## Verified
 
-- **90 Node tests**: URL boundaries; safe page routes; timezone/DST/date parsing; stable IDs; local completion and deadline preservation; reminders and calendar export; current-semester migration and rollover; week counts across midnight; serialized writes; sender validation; sync queue restrictions/recovery; sign-in handling; user-tab preservation; optional Pearson registration; embedded-frame course association and parent-page waiting; collection timing and mutation handling.
-- **27 browser DOM fixtures**: release/due/late date selection including the supplied Gradescope timeline; Brightspace quiz names, inline due dates and populated Evaluation Status; Not Submitted assignments with JavaScript links; unreadable dates; course term sections; hidden rows, shadow roots and duplicates; MyLab due/status/progress columns, plain names, completion icons and stable IDs.
+- **126 Node tests**: URL boundaries; safe page routes; timezone/DST/date parsing; stable IDs; local completion and deadline preservation; reminders and calendar export; current-semester migration and rollover; week counts across midnight; serialized writes; sender validation; sync queue restrictions/recovery; sign-in handling; user-tab preservation; optional Pearson registration; embedded-frame course association and parent-page waiting; collection timing and mutation handling.
+- **29 browser DOM fixtures**: release/due/late date selection including the supplied Gradescope timeline; Brightspace quiz names, inline due dates and populated Evaluation Status; Not Submitted assignments with JavaScript links; unreadable dates; course term sections; hidden rows, shadow roots and duplicates; MyLab due/status/progress columns, plain names, completion icons and stable IDs.
 - **Static checks**: JavaScript syntax, manifest/assets, no inline scripts, scoped host access. Git whitespace check passes.
 - **Interactive sample dashboard**: two navigation views; deadline editing updates list/chart/calendar; restore source date; completion and Completed filter; search; month navigation; current-course dialog excludes older courses; invalid timezone rejection; first-install empty state. Overview and Calendar visually inspected; no console errors observed during these checks.
 
@@ -56,6 +56,31 @@ These checks use synthetic data and mocked extension APIs. The toolbar's actual 
 - All 90 existing Node tests, 27 real-DOM parser fixtures, static JavaScript/assets/CSP checks, and Git whitespace checks pass. Browser viewport overrides still did not apply (the preview stayed at 1280px), so narrow-window layouts remain a live acceptance check. Calendar and table containers retain horizontal scrolling at small widths.
 
 These presentation checks use sample data. Source readers, sync transport, worker privileges, and local storage schema are unchanged. Installed Chrome/Edge popup lifecycle, notifications, and signed-in school responses still need live verification.
+
+## v0.7.0 Google Calendar sync
+
+- 27 new mocked Calendar/worker tests cover owned event creation, durable random IDs, idempotent insert conflict recovery, same-ID date updates, completion deletion and fresh-ID restoration, timed-to-all-day transitions, reminder updates/DST, manual delete/restore, course deselection/reselection, merged-task reconciliation, offline/restart recovery, backoff, silent token renewal, concurrent completion/date edits during network requests, conditional ETag writes, deleted-calendar recovery, concurrent Connect protection, and bounded queue continuation.
+- Tests verify that only matching ownership tags permit remote mutation, tokens never enter storage or GET_STATE, source pages cannot request privileged calendar actions, missing OAuth configuration/unsupported browsers fail safely, uncertain calendar creation is not automatically repeated, and Clear cannot discard pending remote cleanup. Offline disconnect can resume after explicit reauthorization without re-enabling uploads.
+- Browser preview: Calendar connection controls, Settings shortcut, named connection dialog, disabled unconfigured connection, reminder options, setup guide, and unchanged two-view navigation checked with synthetic data. No dashboard console errors observed. All 27 browser extraction fixtures passed.
+- All 117 Node tests and static syntax/asset/CSP checks pass. No real Google account/client is configured in this checkout; OAuth consent, actual API requests, calendar event visibility, and iPhone notification delivery remain live acceptance steps. No calendar entries were written to a real account during testing.
+
+### Google live acceptance after configuration
+
+1. Follow the setup guide using the installed Chrome extension ID and a test Google account; reload the same extension. Do not change its ID or manifest key. Connect and verify that only the app-created calendar scope is requested.
+2. Check one incomplete assignment in the separate calendar. Edit its date in Due North and verify the same Google event moves; change the reminder and confirm its override. Switch a task to date-only and confirm there is no popup reminder.
+3. Complete a task in the popup and dashboard: verify event deletion in Google and cancellation of future reminders. Uncheck it and confirm exactly one event returns. Test a source-completed assignment after a school sync too.
+4. Disconnect the network, edit/complete tasks, restart Chrome, restore connectivity, and verify pending changes converge without duplicates. Revoke access to check Reconnect. Existing events can still remind while a deletion is pending offline.
+5. Test merge/separate, manual delete/Undo, and course exclusion. Personal/unrelated events should remain intact. Disconnect and wait for removal before Clear/uninstall.
+6. In the iPhone Google Calendar app, enable this calendar and notifications. Verify an upcoming reminder with the computer off. Already delivered notifications cannot be recalled.
+
+## v0.7.1 chart selection and deadline-year repair
+
+- 9 additional Node regressions (126 total) cover semester-anchored year inference, Fall-to-January rollover, inferred-year cache repair, explicit-source-year retention, manual/custom deadline preservation, local completion, merged-task baseline preservation, source timestamp/cache year mismatch, future statuses, local date-only/DST boundaries, worker course-term fallback, and updating the same Google event after a cached year correction.
+- Two additional real-DOM fixtures (29 total) cover the screenshot's Brightspace course/assignment pattern with a yearless November due date collected in spring, and an explicitly older source year. The former now resolves to November 22, 2026 and In 36 days as of October 17, 2026; an explicit 2025 date stays 2025.
+- Browser interactions checked selected-day fill/checkmark, filter strip, Show all assignments, repeated keyboard Enter selection and retained focus, manual November 22 deadline showing In 36 days, and November calendar day filtering. The bar hit area computed to transparent while its fill changed color. Zero-count days have no painted bar. Dashboard console showed no errors. The selected-day screenshot is in the release directory.
+- JavaScript syntax, manifest/assets, CSP and Git whitespace checks pass. Existing custom edits and Google sync regressions remain green.
+
+The provided screenshot shows the course term and month/day but not Brightspace's original source year or the extension's stored record. The exact live record was unavailable. Repairs cover the reproduced missing-year/cache failure; explicit dates are not silently shifted into a different year. Dates now show their year so an incorrect professor-supplied year is visible and can be edited locally. Signed-in Chrome/Edge and phone notification delivery remain live acceptance checks.
 
 ## Reproduce
 

@@ -87,3 +87,10 @@ test('a fresh secondary scan cannot make an outdated chosen deadline eligible fo
  const s=state();s.settings.reminders=true;const due=new Date(now+3600000).toISOString();add(s,'b','brightspace',{dueAt:due,lastSeen:now-8*86400000});add(s,'g','gradescope',{dueAt:due});
  T.mergeTasks(s,['b','g'],'b');assert.equal(C.dueReminders(s,now).length,0);
 });
+test('cached year repair preserves a merged task custom deadline and its source baseline',()=>{
+ const s=state(),old=C.parseDue('Nov 22 at 11:59 PM','America/New_York',Date.parse('2026-04-01T12:00Z'));
+ add(s,'a','brightspace',old);add(s,'b','gradescope',old);const id=T.mergeTasks(s,['a','b'],'a');
+ s.groups[id].dueOverride=C.manualDue('2026-11-24','18:00',s.settings.zone);s.groups[id].overrideSourceDue={dueAt:old.dueAt,dueDate:null};s.groups[id].completionOverride='todo';
+ C.migrateState(s,Date.parse('2026-10-17T16:00Z'));
+ assert.equal(T.taskItem(s,id,false).dueAt,'2026-11-23T04:59:00.000Z');assert.equal(T.taskItem(s,id).dueAt,'2026-11-24T23:00:00.000Z');assert.ok(C.sameDeadline(s.groups[id].overrideSourceDue,T.taskItem(s,id,false)));assert.equal(s.groups[id].completionOverride,'todo');
+});

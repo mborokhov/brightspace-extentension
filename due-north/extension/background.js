@@ -1,11 +1,11 @@
 'use strict';
-importScripts('core.js','tasks.js','background-fetch.js');
+importScripts('core.js','tasks.js','background-fetch.js','google-calendar.js');
 const T=DNTasks;
 const C=DNCore,PEARSON_ORIGINS=C.PEARSON_HOSTS.map(host=>`https://${host}/*`),PEARSON_HOME='https://mylabmastering.pearson.com/courses';
 let serial=Promise.resolve();
 const locked=fn=>{const result=serial.then(fn);serial=result.catch(()=>{});return result;};
 const read=async()=>C.migrateState((await chrome.storage.local.get('state')).state);
-const save=state=>chrome.storage.local.set({state});
+const save=async state=>{if(state.google?.enabled||state.google?.disconnecting)state.google.pending=true;await chrome.storage.local.set({state});globalThis.DNGoogleWorker?.schedule(state);};
 const dashboardURL=()=>chrome.runtime.getURL('dashboard.html');
 const trusted=sender=>sender.id===chrome.runtime.id&&!!sender.url?.startsWith(chrome.runtime.getURL(''));
 const pearsonEnabled=async()=>!!(await chrome.permissions?.contains({origins:PEARSON_ORIGINS}));
@@ -181,7 +181,7 @@ function sanitizedSnapshot(snapshot,sender,state){
   const items=(Array.isArray(snapshot.items)?snapshot.items:[]).slice(0,500).flatMap(item=>{
     const url=C.canonicalURL(item.url);if(!url||C.sourceFor(url)!==source||!C.clean(item.title))return [];
     return [{source,url,pageURL,relatedURLs:(Array.isArray(item.relatedURLs)?item.relatedURLs:[]).slice(0,6).map(value=>C.canonicalURL(value)).filter(value=>value&&C.sourceFor(value)!==source),title:C.clean(item.title,250),course:course.title,courseId:course.id||C.clean(item.courseId,80),nativeId:C.clean(item.nativeId,80),type:item.type==='quiz'?'quiz':'assignment',
-      linkVersion:item.linkVersion===2?2:0,status:['submitted','graded','not-submitted'].includes(item.status)?item.status:'unknown',...C.parseDue(C.clean(item.dueRaw,500),state.settings.zone)}];
+      linkVersion:item.linkVersion===2?2:0,status:['submitted','graded','not-submitted'].includes(item.status)?item.status:'unknown',...C.parseDue(C.clean(item.dueRaw,500),state.settings.zone,Date.now(),course.term||state.courses[C.courseKey(source,course.id)]?.term)}];
   });
   const links=(Array.isArray(snapshot.links)?snapshot.links:[]).slice(0,150).flatMap(link=>{
     const url=C.canonicalURL(link.url);return url&&C.pageKind(url)&&C.sourceFor(url)===source?[{url,title:C.clean(link.title,160),source,courseId:C.courseId(url)||C.clean(link.courseId,80)||course.id,term:C.parseTerm(link.term||link.title),inactive:!!link.inactive}]:[];
@@ -263,7 +263,7 @@ async function dispatch(message,sender){
     case 'MERGE_TASKS':{const id=T.mergeTasks(state,[message.id,message.otherId],message.primaryId);await save(state);return {ok:true,id};}
     case 'SEPARATE_TASK':T.separate(state,message.id);await save(state);return {ok:true};
     case 'SET_PRIMARY':{const group=state.groups?.[message.id];if(!group||!group.members.includes(message.primaryId)||!state.items[message.primaryId]||state.items[message.primaryId].deleted)throw Error('Choose one of this task’s sources.');group.primaryId=message.primaryId;await save(state);return {ok:true};}
-    case 'GET_STATE':return {state,pearsonEnabled:await pearsonEnabled()};
+    case 'GET_STATE':return {state,pearsonEnabled:await pearsonEnabled(),googleConfigured:DNGoogleWorker.configured(),googleAvailable:DNGoogleWorker.available()};
     case 'OPEN_ASSIGNMENT':{const item=T.taskItem(state,message.id);if(!item)throw new Error('Assignment not found.');await openAssignment(item,state);return {ok:true};}
     case 'ENABLE_PEARSON':if(!await pearsonEnabled())throw new Error('Allow MyLab access first.');await configurePearson();return {ok:true};
     case 'SYNC':{
@@ -292,21 +292,15 @@ async function dispatch(message,sender){
       state.settings={zone:settings.zone,leadHours:Number(settings.leadHours),reminders:!!settings.reminders,collecting:settings.collecting??state.settings.collecting};
       if(typeof state.settings.collecting!=='boolean')throw new Error('Invalid collection setting');
       if(!state.settings.collecting&&state.job?.running){await releaseCurrent(state);state.job.running=false;await save(state);}
-      const groupBaselines=Object.values(state.groups||{}).filter(group=>group.overrideSourceDue&&C.sameDeadline(group.overrideSourceDue,T.taskItem(state,group.id,false)));
-      for(const item of Object.values(state.items)){
-        const baselineMatches=item.overrideSourceDue&&C.sameDeadline(item.overrideSourceDue,item);
-        Object.assign(item,C.parseDue(item.dueRaw,state.settings.zone));
-        if(baselineMatches)item.overrideSourceDue={dueAt:item.dueAt,dueDate:item.dueDate};
-      }
-      for(const group of groupBaselines){const original=T.taskItem(state,group.id,false);if(original)group.overrideSourceDue={dueAt:original.dueAt,dueDate:original.dueDate};}
+      C.repairDeadlines(state,Date.now(),true);
       await save(C.migrateState(state));await ensureAlarm();if(state.settings.collecting)rescanOpenTabs().catch(()=>{});return {ok:true};
     }
-    case 'CLEAR':{await releaseCurrent(state);const empty=C.emptyState();empty.settings.collecting=false;await save(empty);return {ok:true};}
+    case 'CLEAR':{if(state.google?.enabled||state.google?.disconnecting||Object.keys(state.google?.events||{}).length)throw Error('Disconnect Google Calendar and finish removing its events before clearing data.');await releaseCurrent(state);const empty=C.emptyState();empty.settings.collecting=false;await save(empty);return {ok:true};}
     case 'TEST_NOTIFICATION':await chrome.notifications.create('due-north-test',{type:'basic',iconUrl:'icons/128.png',title:'Due North',message:'Deadline reminders are ready.'});return {ok:true};
     default:throw new Error('Unknown request');
   }
 }
-chrome.runtime.onMessage.addListener((message,sender,reply)=>{if(message?.target==='offscreen-parser')return;locked(()=>dispatch(message,sender)).then(reply,error=>reply({error:error.message}));return true;});
+chrome.runtime.onMessage.addListener((message,sender,reply)=>{if(message?.target==='offscreen-parser')return;const operation=message?.type?.startsWith('GOOGLE_')?trusted(sender)?DNGoogleWorker.request(message):Promise.reject(Error('Only the extension dashboard can perform this action')):locked(()=>dispatch(message,sender));Promise.resolve(operation).then(reply,error=>reply({error:error.message}));return true;});
 chrome.tabs.onRemoved.addListener(id=>locked(async()=>{
   const state=await read(),job=state.job;if(state.opening?.[id])delete state.opening[id];
   if(job?.renderTabId===id){job.renderTabId=null;job.rendererUnavailable=true;delete state.syncTabs?.[id];}
@@ -319,6 +313,7 @@ chrome.tabs.onActivated?.addListener(({tabId})=>locked(async()=>{
   if(job.tabId===tabId)job.tabOwned=false;await save(state);
 }));
 chrome.alarms.onAlarm.addListener(alarm=>{
+  if(alarm.name==='google-sync'){DNGoogleWorker.run().catch(console.error);return;}
   if(alarm.name!=='maintenance')return;
   locked(async()=>{
     const state=await read(),job=state.job;
@@ -363,3 +358,5 @@ chrome.tabs.onUpdated?.addListener((id,change,tab)=>{
     }
   }).catch(console.error);
 });
+
+importScripts('google-worker.js');

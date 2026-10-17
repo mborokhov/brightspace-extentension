@@ -139,3 +139,43 @@ test('duplicate reconciliation respects a newer reset and a removed source deadl
  const b=bsItem({id:'b',lastSeen:now+1000,dueAt:null,dueDate:null,dueRaw:'',dueOverride:null,dueOverrideUpdatedAt:now+1000});
  const merged=C.deduplicateItems({a,b}).a;assert.equal(merged.dueOverride,null);assert.equal(merged.dueAt,null);assert.equal(merged.dueRaw,'');
 });
+test('yearless deadlines use the course semester rather than the nearest year at collection time',()=>{
+ const april=Date.parse('2026-04-01T12:00Z');
+ assert.equal(C.parseDue('Nov 22 at 11:59 PM','America/New_York',april).dueAt,'2025-11-23T04:59:00.000Z');
+ const due=C.parseDue('Nov 22 at 11:59 PM','America/New_York',april,'Fall 2026');
+ assert.equal(due.dueAt,'2026-11-23T04:59:00.000Z');assert.match(due.dateNote,/inferred/);
+ assert.equal(C.parseDue('Jan 3 at 11:59 PM','America/New_York',april,'Fall 2026').dueAt,'2027-01-04T04:59:00.000Z');
+ assert.equal(C.parseDue('Nov 22, 2025 11:59 PM','America/New_York',april,'Fall 2026').dueAt,'2025-11-23T04:59:00.000Z');
+});
+test('upgrade repairs a cached inferred year without changing completion or a custom deadline',()=>{
+ const october=Date.parse('2026-10-17T16:00Z'),raw='Nov 22 at 11:59 PM',old=C.parseDue(raw,'America/New_York',Date.parse('2026-04-01T12:00Z'));
+ const source=bsItem({id:'source',...old,term:'Fall 2026',dueOverride:C.manualDue('2026-11-23','18:00','America/New_York'),overrideSourceDue:{dueAt:old.dueAt,dueDate:old.dueDate},completionOverride:'todo'});
+ const state={schema:2,courses:{'brightspace:42':{key:'brightspace:42',term:'Fall 2026',enabled:true}},items:{source}};
+ C.migrateState(state,october);assert.equal(state.items.source.dueAt,'2026-11-23T04:59:00.000Z');assert.equal(C.effective(state.items.source).dueAt,'2026-11-23T23:00:00.000Z');assert.equal(state.items.source.completionOverride,'todo');assert.ok(C.sameDeadline(state.items.source.overrideSourceDue,state.items.source));
+ const first=JSON.stringify(state);C.migrateState(state,october);assert.equal(JSON.stringify(state),first);
+});
+test('semester-year repair retains explicit source years and never rewrites manually entered dates',()=>{
+ const s={schema:2,courses:{'brightspace:42':{key:'brightspace:42',term:'Fall 2026',enabled:true}},items:{
+  source:bsItem({id:'source',...C.parseDue('Nov 22, 2025 11:59 PM'),term:'Fall 2026'}),
+  manual:{id:'manual',source:'manual',dueAt:'2025-11-23T04:59:00.000Z',dueRaw:'Nov 22 11:59 PM',dateNote:'Year inferred'}
+ }};C.migrateState(s,Date.parse('2026-10-17T16:00Z'));
+ assert.equal(s.items.source.dueAt,'2025-11-23T04:59:00.000Z');assert.equal(s.items.manual.dueAt,'2025-11-23T04:59:00.000Z');
+});
+test('cached dates with the wrong year are repaired from an explicit source timestamp',()=>{
+ const s={schema:2,items:{source:bsItem({id:'source',dueAt:'2025-11-23T04:59:00.000Z',dueRaw:'Nov 22, 2026 11:59 PM'})}};
+ C.migrateState(s,Date.parse('2026-10-17T16:00Z'));assert.equal(s.items.source.dueAt,'2026-11-23T04:59:00.000Z');
+});
+test('future November deadlines have a positive status; past years, completion and edited dates remain distinct',()=>{
+ const october=Date.parse('2026-10-17T16:00Z'),future=item({...C.parseDue('Nov 22, 2026 11:59 PM')}),zone='America/New_York';
+ assert.deepEqual(C.deadlineStatus(future,zone,october),{kind:'',label:'In 36 days',day:'2026-11-22',days:36});
+ assert.equal(C.deadlineStatus({...future,dueAt:'2025-11-23T04:59Z'},zone,october).kind,'past');
+ assert.equal(C.deadlineStatus({...future,completionOverride:'done'},zone,october).kind,'done');
+ assert.equal(C.deadlineStatus({...future,dueAt:'2025-11-23T04:59Z',dueOverride:C.manualDue('2026-11-22','23:59',zone)},zone,october).label,'In 36 days');
+});
+test('date-only tasks become overdue after the course-local day, including DST boundaries',()=>{
+ const zone='America/New_York',dateOnly=item({dueAt:null,dueDate:'2026-11-01'});
+ assert.equal(C.deadlineStatus(dateOnly,zone,Date.parse('2026-11-02T04:59:00Z')).label,'Due today');
+ assert.equal(C.deadlineStatus(dateOnly,zone,Date.parse('2026-11-02T05:00:00Z')).label,'Past due');
+ assert.equal(C.deadlineStatus(item({dueAt:null,dueDate:'2026-10-18'}),zone,Date.parse('2026-10-17T16:00Z')).label,'Tomorrow');
+ assert.equal(C.deadlineStatus(item({dueAt:'invalid',dueDate:null}),zone,now).label,'To do');
+});

@@ -1,6 +1,6 @@
 'use strict';
 const C=DNCore,T=DNTasks,$=id=>document.getElementById(id),extension=location.protocol==='chrome-extension:'&&!!globalThis.chrome?.runtime?.id;
-let state=C.emptyState(),view='overview',selectedDay='',week=C.weekStart(Date.now(),state.settings.zone),month=C.dateKey(Date.now(),state.settings.zone).slice(0,7),editingId='',detailsId='',manualId='',pearsonReady=false,toastTimer;
+let state=C.emptyState(),view='overview',selectedDay='',week=C.weekStart(Date.now(),state.settings.zone),month=C.dateKey(Date.now(),state.settings.zone).slice(0,7),editingId='',detailsId='',manualId='',pearsonReady=false,googleConfigured=false,googleAvailable=false,googleBusy=false,toastTimer;
 const sourceNames=T.SOURCES,schoolSources=['brightspace','gradescope','pearson'];
 const el=(tag,cls,value)=>{const node=document.createElement(tag);if(cls)node.className=cls;if(value!==undefined)node.textContent=value;return node;};
 function toast(message){$('toast').textContent=message;$('toast').hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>{$('toast').hidden=true;},5500);}
@@ -21,11 +21,11 @@ async function send(message){
   }
   const response=await chrome.runtime.sendMessage(message);if(response?.error)throw new Error(response.error);return response;
 }
-async function refresh(){try{if(extension){const data=await send({type:'GET_STATE'});state=data.state;pearsonReady=data.pearsonEnabled;}render();}catch(error){$('status').textContent=error.message;}}
+async function refresh(){try{if(extension){const data=await send({type:'GET_STATE'});state=data.state;pearsonReady=data.pearsonEnabled;googleConfigured=data.googleConfigured;googleAvailable=data.googleAvailable;}render();}catch(error){$('status').textContent=error.message;}}
 async function act(message){try{await send(message);await refresh();}catch(error){toast(error.message);}}
 function dayOf(item){return item.dueAt?C.dateKey(item.dueAt,state.settings.zone):item.dueDate||'';}
 function dayLabel(day,options={month:'short',day:'numeric'}){return new Intl.DateTimeFormat('en-US',{timeZone:'UTC',...options}).format(new Date(`${day}T12:00:00Z`));}
-function dateLabel(item){const day=dayOf(item);return day?dayLabel(day):'Set date';}
+function dateLabel(item){const day=dayOf(item);return day?dayLabel(day,{month:'short',day:'numeric',year:'numeric'}):'Set date';}
 function timeLabel(item){return item.dueAt?new Intl.DateTimeFormat('en-US',{timeZone:state.settings.zone,hour:'numeric',minute:'2-digit'}).format(new Date(item.dueAt)):item.dueDate?'All day':'';}
 function deadlineText(item){return dayOf(item)?`${dateLabel(item)} ${timeLabel(item)}`.trim():'No deadline';}
 function relative(ms){if(!ms)return 'Not synced';const min=Math.max(0,Math.round((Date.now()-ms)/60000));return min<1?'Just synced':min<60?`${min}m ago`:min<1440?`${Math.floor(min/60)}h ago`:`${Math.floor(min/1440)}d ago`;}
@@ -36,7 +36,16 @@ function renderWeek(items){
   $('week-heading').textContent=week===C.weekStart(Date.now(),state.settings.zone)?'This week':'Weekly workload';
   $('week-range').textContent=`${dayLabel(week)} – ${dayLabel(C.shiftDay(week,6))}`;$('week-total').textContent=`${data.reduce((n,d)=>n+d.count,0)} to do`;
   $('chart-axis').replaceChildren(...[max,Math.round(max*.75),Math.round(max*.5),Math.round(max*.25),0].map(n=>el('span','',n)));
-  $('week-chart').replaceChildren(...data.map(({day,count})=>{const b=el('button',`day-bar${day===today?' today':''}${day===selectedDay?' selected':''}`);b.setAttribute('aria-label',`${dayLabel(day,{weekday:'long',month:'long',day:'numeric'})}: ${count} assignments due`);b.setAttribute('aria-pressed',String(day===selectedDay));const track=el('span','bar-track'),fill=el('span','bar-fill');fill.style.height=`${count/max*100}%`;const countLabel=el('span','bar-count',count);countLabel.style.bottom=`calc(${count/max*100}% + 5px)`;track.append(countLabel,fill);b.append(track,el('span','bar-day',dayLabel(day,{weekday:'short'})),el('span','bar-date',dayLabel(day)));b.addEventListener('click',()=>{selectedDay=selectedDay===day?'':day;render();});return b;}));
+  const focusDay=document.activeElement?.closest('.day-bar')?.dataset.day;
+  $('week-chart').replaceChildren(...data.map(({day,count})=>{
+    const selected=day===selectedDay,b=el('button',`day-bar${day===today?' today':''}${selected?' selected':''}`);b.dataset.day=day;
+    b.setAttribute('aria-label',`${dayLabel(day,{weekday:'long',month:'long',day:'numeric'})}: ${count} assignments due${selected?', selected':''}`);b.setAttribute('aria-pressed',String(selected));b.setAttribute('aria-controls','assignment-rows');
+    const track=el('span','bar-track'),fill=el('span','bar-fill');fill.style.height=`${count/max*100}%`;
+    const countLabel=el('span','bar-count',count);countLabel.style.bottom=`calc(${count/max*100}% + 5px)`;track.append(countLabel,fill);
+    const label=el('span','bar-label');label.append(el('span','bar-day',dayLabel(day,{weekday:'short'})+(selected?' ✓':'')),el('span','bar-date',dayLabel(day)));
+    b.append(track,label);b.addEventListener('click',()=>{selectedDay=selectedDay===day?'':day;render();});return b;
+  }));
+  if(focusDay)$('week-chart').querySelector(`[data-day="${focusDay}"]`)?.focus({preventScroll:true});
 }
 function renderCalendar(items){
   $('month-title').textContent=dayLabel(month+'-01',{month:'long',year:'numeric'});
@@ -52,10 +61,10 @@ function renderCalendar(items){
 }
 function renderList(items){
   const now=Date.now(),filtered=items.filter(i=>statusMatches(i)&&(!selectedDay||dayOf(i)===selectedDay)&&(view!=='calendar'||selectedDay||dayOf(i).slice(0,7)===month)).sort((a,b)=>T.compareTasks(a,b,state.settings.zone));
-  $('list-count').textContent=filtered.length;$('date-filter').hidden=!selectedDay;$('date-filter').textContent=selectedDay?`${dayLabel(selectedDay)} ×`:'';
+  $('list-count').textContent=filtered.length;$('day-filter').hidden=!selectedDay;$('day-filter-label').textContent=selectedDay?`Showing ${dayLabel(selectedDay,{weekday:'long',month:'short',day:'numeric'})}`:'';
   const body=$('assignment-rows');body.replaceChildren();
   for(const item of filtered){
-    const done=C.isDone(item),past=!done&&item.dueAt&&Date.parse(item.dueAt)<now,row=el('tr',done?'completed':'');
+    const done=C.isDone(item),deadlineState=C.deadlineStatus(item,state.settings.zone,now),past=deadlineState.kind==='past',row=el('tr',done?'completed':'');
     const checkCell=el('td'),check=el('input','completion');check.type='checkbox';check.checked=done;check.setAttribute('aria-label',`Mark ${item.title} ${done?'incomplete':'complete'}`);check.addEventListener('change',()=>act({type:'SET_ITEM',id:item.id,completionOverride:check.checked?'done':'todo'}));const target=el('label','completion-target');target.append(check);checkCell.append(target);row.append(checkCell);
     const nameCell=el('td'),hasLink=!!C.assignmentOpenURL(item),link=el(extension&&hasLink?'a':'button','assignment-link',item.title);
     if(link.tagName==='A'){link.href=C.assignmentOpenURL(item);link.target='_blank';link.rel='noopener noreferrer';link.addEventListener('click',event=>{if(event.button||event.ctrlKey||event.metaKey||event.shiftKey||event.altKey)return;event.preventDefault();act({type:'OPEN_ASSIGNMENT',id:item.id});});}
@@ -68,7 +77,7 @@ function renderList(items){
     row.append(nameCell);
     const course=el('td');const courseName=el(item.source==='brightspace'&&extension?'a':'span','course-name',item.course);if(courseName.tagName==='A'){courseName.href=C.courseListURL(item);courseName.target='_blank';courseName.rel='noopener noreferrer';courseName.title='Open the course assignment list';}course.append(courseName,el('span','source-name',item.merged?'Merged assignment':sourceNames[item.source]));row.append(course);
     const dateCell=el('td'),date=el('div',`deadline${past?' past':''}`,dateLabel(item));date.title=`${item.dueRaw||'No date provided'}${item.dueOverride?' · Custom deadline':''}`;date.append(el('small','',`${timeLabel(item)}${item.dueOverride?' · Edited':''}`));dateCell.append(date);row.append(dateCell);
-    const statusCell=el('td');let status=done?['done','Completed']:past?['past','Past due']:item.dueAt&&Date.parse(item.dueAt)-now<2*86400000?['soon','Due soon']:['','To do'];statusCell.append(el('span',`pill ${status[0]}`,status[1]));if(item.completionOverride){const reset=el('button','reset-status','Use source status');reset.addEventListener('click',()=>act({type:'SET_ITEM',id:item.id,completionOverride:''}));statusCell.append(reset);}row.append(statusCell);
+    const statusCell=el('td');statusCell.append(el('span',`pill ${deadlineState.kind}`,deadlineState.label));if(item.completionOverride){const reset=el('button','reset-status','Use source status');reset.addEventListener('click',()=>act({type:'SET_ITEM',id:item.id,completionOverride:''}));statusCell.append(reset);}row.append(statusCell);
     const editCell=el('td'),edit=el('button','edit-button','Edit date');edit.setAttribute('aria-label',`Edit deadline for ${item.title}`);edit.addEventListener('click',()=>openEditor(item.id));const details=el('button','edit-button','Details');details.setAttribute('aria-label',`Details for ${item.title}`);details.addEventListener('click',()=>openDetails(item.id));editCell.append(edit,details);row.append(editCell);body.append(row);
   }
   const courseCount=Object.values(state.courses).filter(c=>C.isCourseActive(state,c.key)).length;
@@ -89,6 +98,7 @@ function render(){
     $(source+'-source').title=`${stamp?'Last successful sync: '+new Date(stamp).toLocaleString('en-US',{timeZone:state.settings.zone}):'No successful full check yet'}${data.message?' · '+data.message:''}`;
   }
   if(!pearsonReady)$('pearson-source').title='Enable MyLab Math';
+  renderGoogle();
   const items=baseItems();renderWeek(items);if(view==='calendar')renderCalendar(items);renderList(items);
   if($('courses-dialog').open)renderCourses();if($('coverage-dialog').open)renderCoverage();
 }
@@ -115,7 +125,7 @@ async function openSource(source){
 }
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>{view=button.dataset.view;selectedDay='';document.querySelectorAll('[data-view]').forEach(b=>{b.classList.toggle('active',b===button);if(b===button)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});render();}));
 for(const id of ['search','course-filter','status-filter'])$(id).addEventListener(id==='search'?'input':'change',render);
-$('date-filter').addEventListener('click',()=>{selectedDay='';render();});
+$('date-filter').addEventListener('click',()=>{selectedDay='';render();document.querySelector(view==='calendar'?'#month-today':'#week-today')?.focus({preventScroll:true});});
 $('week-prev').addEventListener('click',()=>{week=C.shiftDay(week,-7);selectedDay='';render();});$('week-next').addEventListener('click',()=>{week=C.shiftDay(week,7);selectedDay='';render();});$('week-today').addEventListener('click',()=>{week=C.weekStart(Date.now(),state.settings.zone);selectedDay='';render();});
 function moveMonth(delta){const date=new Date(month+'-01T12:00:00Z');date.setUTCMonth(date.getUTCMonth()+delta);month=date.toISOString().slice(0,7);selectedDay='';render();}
 $('month-prev').addEventListener('click',()=>moveMonth(-1));$('month-next').addEventListener('click',()=>moveMonth(1));$('month-today').addEventListener('click',()=>{month=C.dateKey(Date.now(),state.settings.zone).slice(0,7);selectedDay='';render();});
@@ -172,3 +182,35 @@ $('merge-open').addEventListener('click',()=>{
 });
 $('merge-target').addEventListener('change',mergeOptions);
 $('merge-form').addEventListener('submit',async event=>{event.preventDefault();try{await send({type:'MERGE_TASKS',id:detailsId,otherId:$('merge-target').value,primaryId:$('merge-primary').value});$('merge-dialog').close();await refresh();toast('Assignments merged.');}catch(error){$('merge-error').textContent=error.message;}});
+
+function renderGoogle(){
+  const g=state.google||{},active=g.enabled||g.disconnecting,configured=extension&&googleConfigured;
+  $('google-status').textContent=DNGoogle.status(g);$('google-open').textContent=active?'Manage calendar':'Connect calendar';
+  $('google-footer-note').textContent=active?'· Google Calendar sync enabled':'';
+  $('google-detail').textContent=!extension?'Install Due North in Chrome to connect your calendar.':!googleAvailable?'Google Calendar sync requires Google Chrome.':!configured?'One-time Google setup required. Follow the guide, then reload the extension.':g.disconnected?'Disconnected. Due North assignment events were removed.':DNGoogle.status(g)+(g.lastSync?' · Last synced '+new Date(g.lastSync).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'');
+  $('google-connect').hidden=!!(active&&!g.authRequired);$('google-connect').disabled=googleBusy||!configured||!googleAvailable;
+  $('google-connect').textContent=g.creating?'Retry setup':g.authRequired?'Reconnect':'Connect Google Calendar';
+  $('google-sync').hidden=!active;$('google-sync').disabled=googleBusy||!!g.authRequired;
+  $('google-disconnect').hidden=!g.enabled;$('google-disconnect').disabled=googleBusy;
+  if(document.activeElement!==$('google-reminder'))$('google-reminder').value=g.reminder||'morning';
+  $('google-reminder').disabled=googleBusy||!!g.disconnecting;
+  $('google-setup-link').hidden=configured&&!!active&&!g.error&&!g.authRequired;
+}
+function openGoogle(){renderGoogle();$('google-error').textContent='';$('google-dialog').showModal();}
+async function googleAction(message){
+  googleBusy=true;renderGoogle();$('google-error').textContent='';
+  try{await send(message);await refresh();}catch(error){$('google-error').textContent=error.message;}
+  finally{googleBusy=false;renderGoogle();}
+}
+$('google-open').addEventListener('click',openGoogle);
+$('google-settings-open').addEventListener('click',()=>{$('settings-dialog').close();openGoogle();});
+$('google-connect').addEventListener('click',async()=>{
+  // Host access is requested directly from this user gesture, before any worker message.
+  if(!extension)return;
+  try{if(!await chrome.permissions.request({origins:['https://www.googleapis.com/*']}))throw Error('Google Calendar access was not allowed.');await googleAction({type:state.google?.creating?'GOOGLE_RETRY_SETUP':'GOOGLE_CONNECT'});}
+  catch(error){$('google-error').textContent=error.message;}
+});
+$('google-sync').addEventListener('click',()=>googleAction({type:'GOOGLE_SYNC'}));
+$('google-reminder').addEventListener('change',()=>{if(extension)googleAction({type:'GOOGLE_SETTINGS',reminder:$('google-reminder').value});});
+$('google-disconnect').addEventListener('click',()=>{$('google-dialog').close();$('google-disconnect-dialog').showModal();});
+$('google-confirm-disconnect').addEventListener('click',async()=>{$('google-disconnect-dialog').close();openGoogle();await googleAction({type:'GOOGLE_DISCONNECT'});});

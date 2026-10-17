@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Due North \u2014 Purdue Assignment Tracker",
-  "version": "0.6.0",
+  "version": "0.7.1",
   "description": "Current-semester assignments, editable deadlines, weekly workload and a calendar for Purdue Brightspace, Gradescope and MyLab Math.",
   "minimum_chrome_version": "120",
   "permissions": [
@@ -9,7 +9,8 @@
     "alarms",
     "notifications",
     "scripting",
-    "offscreen"
+    "offscreen",
+    "identity"
   ],
   "host_permissions": [
     "https://purdue.brightspace.com/*",
@@ -55,6 +56,7 @@
     "https://mylabmastering.pearson.com/*",
     "https://www.mathxl.com/*",
     "https://mylab.pearson.com/*",
-    "https://xlitemprod.pearsoncmg.com/*"
+    "https://xlitemprod.pearsoncmg.com/*",
+    "https://www.googleapis.com/*"
   ]
 }

@@ -84,7 +84,7 @@
     if(dueCell)return labelDate(dueCell)||normal;
     return labelDate(row);
   }
-  function baseItem(source,course,url,pageURL,title,raw,zone,now,extra={}){return {source,title:C.clean(title,250),course:course.title,courseId:course.id,term:course.term,url,linkVersion:2,pageURL:C.canonicalURL(pageURL),...C.parseDue(raw,zone,now),...extra};}
+  function baseItem(source,course,url,pageURL,title,raw,zone,now,extra={}){return {source,title:C.clean(title,250),course:course.title,courseId:course.id,term:course.term,url,linkVersion:2,pageURL:C.canonicalURL(pageURL),...C.parseDue(raw,zone,now,course.term),...extra};}
   function gradescope(doc,roots,url,zone,now,course){
     const items=[];
     for(const row of query(roots,'tr,[role="row"]')){

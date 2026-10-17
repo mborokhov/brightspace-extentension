@@ -126,6 +126,15 @@ test('Brightspace preserves direct cross-platform assignment references without 
  const s=extract('<table><tr><td><a href="/d2l/lms/dropbox/user/folder_submit_files.d2l?db=5&ou=42">Homework 5</a><div>Due on September 20, 2026 11:59 PM</div><a href="https://www.gradescope.com/courses/42/assignments/99/submissions/new?token=secret">Gradescope submission</a><a href="https://evil.test/">External</a></td><td>Not Submitted</td></tr></table>',bs);
  equal(s.items.length,1);equal(s.items[0].relatedURLs.length,1);equal(s.items[0].relatedURLs[0],'https://www.gradescope.com/courses/42/assignments/99/submissions/new');
 });
+test('Brightspace yearless November deadlines use the Fall course year, even when collected in spring',()=>{
+ const page=doc('<title>Assignments - Fall 2026 ECE 33700-010 LEC - Merge</title><table><tr><td><a href="/d2l/lms/dropbox/user/folder_submit_files.d2l?db=5&ou=42">CDL RTL Diagrams</a><div>Due on Nov 22 at 11:59 PM</div></td><td>Not Submitted</td></tr></table>');
+ const s=DNExtract.extract(page,bs,{zone:'America/New_York'},Date.parse('2026-04-01T12:00Z'));
+ equal(s.items.length,1);equal(s.course.term,'Fall 2026');equal(s.items[0].dueAt,'2026-11-23T04:59:00.000Z');equal(DNCore.deadlineStatus(s.items[0],'America/New_York',Date.parse('2026-10-17T16:00Z')).label,'In 36 days');
+});
+test('an explicit source year is retained even when it differs from the course year',()=>{
+ const s=extract('<title>Assignments - Fall 2026 ECE 33700</title><table><tr><td><a href="/d2l/lms/dropbox/user/folder_submit_files.d2l?db=5&ou=42">Assignment</a><div>Due on Nov 22, 2025 11:59 PM</div></td></tr></table>',bs);
+ equal(s.items[0].dueAt,'2025-11-23T04:59:00.000Z');
+});
 const passed=results.filter(r=>r.pass).length;
 document.getElementById('test-summary').textContent=`${passed}/${results.length} passed${passed===results.length?' — all parser checks passed.':' — failures need attention.'}`;
 document.title=`${passed===results.length?'PASS':'FAIL'} · Due North DOM tests`;
